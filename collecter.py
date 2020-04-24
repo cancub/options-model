@@ -9,9 +9,17 @@ import pandas as pd
 from questrade_api import Questrade
 import sys
 
-# Globals
 TICKERS                 = sys.argv[1:]
-WINDOW_DAYS             = 90
+
+# Some tickers have a bunch of expiry dates (e.g., SPY), others not so much.
+# We want to have at least MINIMUM_EXPIRIES to work with, but we don't want to
+# go overboard. So stop when we both:
+#   - hit the minimum
+#   - qualify for either maximum
+MINIMUM_EXPIRIES        = 10
+MAXIMUM_DAYS            = 90
+MAXIMUM_EXPIRIES        = 30
+
 STORAGE_DIR             = 'pickles'
 META_COLUMNS            = ['symbolId', 'type', 'strike']
 DATA_NAMES              = ['lastTradePrice', 'volume', 'volatility', 'delta', 'gamma',
@@ -40,7 +48,8 @@ def update_price_df(ticker, current_info):
 def get_expiry_dates():
     '''
     Starting from the upcoming friday, get the list of expiry dates for the next
-    WINDOW_DAYS days (on fridays) years.
+    two years. With this, we'll be able to get at least 10 valid expirydates for
+    each ticker
     '''
     today = date.today()
 
@@ -58,7 +67,7 @@ def get_expiry_dates():
 
     return pd.date_range(
                 expiry.isoformat(),
-                (expiry + timedelta(days=WINDOW_DAYS)).isoformat(),
+                (expiry + timedelta(weeks=104)).isoformat(),
                 freq='7D'
             )
 
@@ -158,14 +167,32 @@ for ticker in TICKERS:
     expiries = []
     today = date.today()
 
+    expiry_count = 0
+
     results = {}
     # Get all the data in one fell swoop for each expiry
-    for ex in get_expiry_dates():
-        results[str(ex)] = q.markets_options(
+    dates = get_expiry_dates()
+    for ex in dates:
+        r = q.markets_options(
             filters=[{
                 'underlyingId': code,
-                'expiryDate': str(ex),
+                'expiryDate': ex.isoformat(),
             }])['optionQuotes']
+
+        if len(r) == 0:
+            # Nothing to see here, move along
+            continue
+
+        results[ex.isoformat()] = deepcopy(r)
+        expiry_count += 1
+
+        # Check to see if we've got at least the number of expiries we wanted
+        # AND we're etiher past the specified maximum number of days or now have
+        # the maximum number of expiries.
+        if expiry_count >= MINIMUM_EXPIRIES:
+            if ( (ex >= dates[0] + timedelta(days=MAXIMUM_DAYS))
+                    or (expiry_count == MAXIMUM_EXPIRIES) ):
+                break
 
     # Process the expiries and their respective series
     for ex, series_data in results.items():
