@@ -8,23 +8,28 @@ import os
 import pandas as pd
 from questrade_api import Questrade
 import sys
+import threading
+import time
+import random
 
-TICKERS                 = sys.argv[1:]
+TICKERS          = sys.argv[1:]
 
 # Some tickers have a bunch of expiry dates (e.g., SPY), others not so much.
 # We want to have at least MINIMUM_EXPIRIES to work with, but we don't want to
 # go overboard. So stop when we both:
 #   - hit the minimum
 #   - qualify for either maximum
-MINIMUM_EXPIRIES        = 10
-MAXIMUM_DAYS            = 90
-MAXIMUM_EXPIRIES        = 30
+MINIMUM_EXPIRIES = 10
+MAXIMUM_DAYS     = 90
+MAXIMUM_EXPIRIES = 30
 
-STORAGE_DIR             = 'pickles'
-META_COLUMNS            = ['symbolId', 'type', 'strike']
-DATA_NAMES              = ['lastTradePrice', 'volume', 'volatility', 'delta', 'gamma',
-                           'theta', 'vega', 'rho', 'openInterest']
-NOW_DT                  = datetime.now()
+STORAGE_DIR      = 'pickles'
+META_COLUMNS     = ['symbolId', 'type', 'strike']
+DATA_NAMES       = ['lastTradePrice', 'volume', 'volatility', 'delta', 'gamma',
+                    'theta', 'vega', 'rho', 'openInterest']
+NOW_DT           = datetime.now()
+
+
 
 # Helper functions
 def update_price_df(ticker, current_info):
@@ -130,8 +135,53 @@ def add_new_series(meta_df, series_data):
             meta_df = meta_df.append(pd.DataFrame(metadata_dict))
     return meta_df
 
-for ticker in TICKERS:
-    print(ticker)
+
+
+# Script
+
+# Get the api-related dict and load the API object
+with open(os.path.expanduser('~/.questrade.json'), 'r') as QF:
+    qtrade_json = json.load(QF)
+q = Questrade(refresh_token=qtrade_json['refresh_token'])
+
+# Build the list fo expiry dates that we'll be searching for in each ticker
+dates   = get_expiry_dates()
+max_day = dates[0] + timedelta(days=MAXIMUM_DAYS)
+
+# We're now going to make a series of per-ticker API calls. We speed this up by
+# using a single thread for each ticker. It's possible that a thread will be
+# wasted on a non-existent ticker and as such it *would* be better to thread
+# by _action_ rather than ticker (e.g., get symbol, get price, get expiry). This
+# could get kinda unweidly though, since we should also be threading along expiry
+# lines.
+
+# The function to use in threading
+def options_gofer(q_if, ticker):
+    print('{}: starting'.format(ticker))
+
+    # we need a random seed for the time.sleep without collision
+    random.seed(sum((ord(ch) for ch in ticker)))
+
+    # Intial temporal staggering of threads to help avoid simultaneous requests
+    time.sleep(random.random())
+
+    # Build up basic description of company
+    company = None
+    for c in q_if.symbols_search(prefix=ticker)['symbols']:
+        if c['symbol'] == ticker:
+            company = c
+            break
+
+    # Don't create diddly if we weren't able to find the company
+    if company is None:
+        raise Exception(
+            'Could not get any information for {}. Exiting.'.format(ticker))
+
+
+    # We know we've got the right company, so store the questrade code in order
+    # to request it later
+    code = company['symbolId']
+
     # Make sure we have the proper storage directory for the ticker
     try:
         os.mkdir(os.path.join(STORAGE_DIR, ticker))
@@ -139,63 +189,62 @@ for ticker in TICKERS:
         if e.errno != errno.EEXIST:
             raise
 
-    # Get the api-related dict and load the API object
-    with open(os.path.expanduser('~/.questrade.json'), 'r') as QF:
-        qtrade_json = json.load(QF)
-    q = Questrade(refresh_token=qtrade_json['refresh_token'])
-
-    # Build up basic description of company
-    company = None
-    for c in q.symbols_search(prefix=ticker)['symbols']:
-        if c['symbol'] == ticker:
-            company = c
-            break
-    if company is None:
-        continue
-    code = company['symbolId']
-
     # Find the most recent info about the underlying security
-    current_info = q.markets_quote(code)
-    for info in current_info['quotes']:
+    current_info = None
+    response = q_if.markets_quote(code)
+    for info in response['quotes']:
         if info['symbol'] == ticker:
             current_info = info
             break
+
+    if current_info is None:
+        raise Exception(
+            'Could not find current quote for {}. Exiting.'.format(ticker))
+
     update_price_df(ticker, current_info)
 
-    # Starting from the upcoming friday, get the list of expiry dates
-    #going out to the specified number of days
-    expiries = []
-    today = date.today()
+    # Get all the data in one fell swoop for each valid expiry in our range
+    expiries        = {}
+    expiry_count    = 0
 
-    expiry_count = 0
-
-    results = {}
-    # Get all the data in one fell swoop for each expiry
-    dates = get_expiry_dates()
     for ex in dates:
-        r = q.markets_options(
-            filters=[{
-                'underlyingId': code,
-                'expiryDate': ex.isoformat(),
-            }])['optionQuotes']
+        while True:
+            # Another staggering
+            time.sleep(random.random())
 
-        if len(r) == 0:
+            r = q.markets_options(
+                filters=[{
+                    'underlyingId': code,
+                    'expiryDate': ex.isoformat(),
+                }])
+            if 'optionQuotes' in r.keys():
+                break
+            elif 'code' in r.keys() and r['code'] == 1006:
+                continue
+            else:
+                raise Exception('Dunno what this is: {}'.format(r))
+
+
+        series = r['optionQuotes']
+        if len(series) == 0:
             # Nothing to see here, move along
             continue
 
-        results[ex.isoformat()] = deepcopy(r)
+        expiries[ex.isoformat()] = list(series)
         expiry_count += 1
+
+        print('{}: got valid expiry {}'.format(ticker, ex))
 
         # Check to see if we've got at least the number of expiries we wanted
         # AND we're etiher past the specified maximum number of days or now have
         # the maximum number of expiries.
         if expiry_count >= MINIMUM_EXPIRIES:
-            if ( (ex >= dates[0] + timedelta(days=MAXIMUM_DAYS))
-                    or (expiry_count == MAXIMUM_EXPIRIES) ):
+            if ( (ex >= max_day) or (expiry_count == MAXIMUM_EXPIRIES) ):
                 break
 
+    print('{}: processing series for each expiry'.format(ticker))
     # Process the expiries and their respective series
-    for ex, series_data in results.items():
+    for ex, series_data in expiries.items():
         # Collect all the dataframes
         dataframes = get_expiry_dataframes(ticker, ex)
 
@@ -214,3 +263,15 @@ for ticker in TICKERS:
         dataframes['meta'] = add_new_series(meta_df, series_data)
 
         write_expiry_dataframes(ticker, ex, dataframes)
+
+    print('{}: complete'.format(ticker))
+
+threads = []
+
+for ticker in TICKERS:
+    t = threading.Thread(target=options_gofer, args=(deepcopy(q), ticker,))
+    t.start()
+    threads.append(t)
+
+for t in threads:
+    t.join()
