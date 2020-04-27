@@ -1,3 +1,4 @@
+import config
 from datetime import datetime
 import json
 import math
@@ -136,8 +137,6 @@ class QuestradeTickerOptions(Questrade):
             # Once we've found the data, we don't care about the minutiea of the
             # timezone and milliseconds
             dir_date = str(datetime.strptime(ex_date, EXPIRY_FORMAT).date())
-            print('{:>5}: retreiving {}'.format(
-                self.__company_meta['symbol'], ex_date))
 
             # Gather up the series for this expiry.
             quotes = self._overload_robust_request(

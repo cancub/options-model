@@ -22,7 +22,8 @@ NOW_DT           = datetime.datetime.now()
 # The function to use in threading
 def options_gofer(q_obj, ticker):
     def log(msg):
-        print('{:>5}: {}'.format(ticker, msg))
+        if not config.QUIET:
+            print('{:>5}: {}'.format(ticker, msg))
 
     log('starting')
 
