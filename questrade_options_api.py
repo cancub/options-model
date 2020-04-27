@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import math
 import os
@@ -9,6 +10,8 @@ from questrade_api import Questrade
 TODO:
 - convert _company_check() to decorator
 '''
+
+EXPIRY_FORMAT = '%Y-%m-%dT%H:%M:%S.%f%z'
 
 class QuestradeTickerOptions(Questrade):
 
@@ -130,6 +133,9 @@ class QuestradeTickerOptions(Questrade):
             new_ex = {}
             ex_date = ex['expiryDate']
 
+            # Once we've found the data, we don't care about the minutiea of the
+            # timezone and milliseconds
+            dir_date = str(datetime.strptime(ex_date, EXPIRY_FORMAT).date())
             print('{:>5}: retreiving {}'.format(
                 self.__company_meta['symbol'], ex_date))
 
@@ -151,6 +157,7 @@ class QuestradeTickerOptions(Questrade):
                         'strike': s['strikePrice'],
                         'data': series_data[op_id]
                     }
-            options[ex_date] = new_ex
+
+            options[dir_date] = new_ex
 
         return options
