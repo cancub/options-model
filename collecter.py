@@ -2,22 +2,25 @@
 # coding: utf-8
 from copy import deepcopy
 import datetime
-import errno
-import json
 import os
-import pandas as pd
 import sys
 import threading
 import time
 import random
 
 import config
-from dataframe_management import (get_expiry_dataframes, write_expiry_dataframes,
-                                  add_new_series, update_price_df)
+from data_management import update_data_files, update_price_df
 from questrade_options_api import QuestradeTickerOptions
 
-TICKERS          = sys.argv[1:]
-NOW_DT           = datetime.datetime.now()
+TICKERS    = sys.argv[1:]
+NOW_DT     = datetime.datetime.now()
+
+# The lock related to accessing or modifying the filesystem
+FS_LOCK    = threading.Lock()
+
+# The lock related to adding a price to the price dictionary for this datetime
+PRICE_LOCK = threading.Lock()
+prices = {'datetime': [NOW_DT]}
 
 # The function to use in threading
 def options_gofer(q_obj, ticker):
@@ -28,17 +31,17 @@ def options_gofer(q_obj, ticker):
     log('starting')
 
     # Retrieve and store all the available metadata for the company
+    # TODO: save this value to file to avoid one RTT
     q_obj.load_company(ticker)
 
-    # Make sure we have the proper storage directory for the ticker
-    try:
-        os.mkdir(os.path.join(config.STORAGE_DIR, ticker))
-    except OSError as e:
-        if e.errno != errno.EEXIST:
-            raise
+    if config.MULTITHREADED:
+        PRICE_LOCK.acquire()
 
     # Save the most recent price of the underlying security
-    update_price_df(ticker, q_obj.get_security_price(), NOW_DT)
+    prices[ticker] = [q_obj.get_security_price()]
+
+    if config.MULTITHREADED:
+        PRICE_LOCK.release()
 
     log('retreiving options for each available expiry')
 
@@ -48,27 +51,8 @@ def options_gofer(q_obj, ticker):
 
     # Process the expiries and their respective series
     for ex, series_data in options.items():
-        # Collect all the dataframes
-        dataframes = get_expiry_dataframes(ticker, ex)
-
-        # We're just adding any previously-unseen series in the metadata
-        # dataframe, i.e., we won't be looping, so pop this out and add
-        # it back with the unseen series
-        meta_df = dataframes.pop('meta')
-
-        # Update each of the data dfs
-        for metadata_name in dataframes.keys():
-            log('processing {} for {}'.format(metadata_name, ex))
-
-            data_dict = {k: v['data'][metadata_name] 
-                         for k, v in series_data.items()}
-            data_dict['datetime'] =  [NOW_DT]
-            dataframes[metadata_name] = dataframes[metadata_name].append(
-                pd.DataFrame(data_dict))
-
-        dataframes['meta'] = add_new_series(meta_df, series_data)
-
-        write_expiry_dataframes(ticker, ex, dataframes)
+        log('processing {}'.format(ex))
+        update_data_files(ticker, ex, series_data, NOW_DT, FS_LOCK)
 
     log('complete')
 
@@ -90,4 +74,5 @@ if config.MULTITHREADED:
     for t in threads:
         t.join()
 
-
+# Update the price dataframe now that all the threads are done
+update_price_df(prices)

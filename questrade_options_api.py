@@ -134,7 +134,7 @@ class QuestradeTickerOptions(Questrade):
             new_ex = {}
             ex_date = ex['expiryDate']
 
-            # Once we've found the data, we don't care about the minutiea of the
+            # Once we've found the data, we don't care about the minutiae of the
             # timezone and milliseconds
             dir_date = str(datetime.strptime(ex_date, EXPIRY_FORMAT).date())
 
