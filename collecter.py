@@ -12,7 +12,7 @@ import config
 from data_management import update_data_files, update_price_df
 from questrade_options_api import QuestradeTickerOptions
 
-TICKERS    = sys.argv[1:]
+TICKERS    = [x.upper() for x in list(set(sys.argv[1:]))]
 NOW_DT     = datetime.datetime.now()
 
 # The lock related to accessing or modifying the filesystem
