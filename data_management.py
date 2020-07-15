@@ -175,7 +175,10 @@ def add_new_series(meta_df, series_data):
                 'type': [data['type']],
                 'strike': [data['strike']],
             }
-            meta_df = meta_df.append(pd.DataFrame(metadata_dict))
+            # We need to ignore index so that the index of each row corresponds
+            # to the index of the respective option in the numpy dictionary
+            meta_df = meta_df.append(
+                pd.DataFrame(metadata_dict), ignore_index=True)
     return meta_df
 
 def update_price_df(data_dict):
