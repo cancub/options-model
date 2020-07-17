@@ -1,8 +1,10 @@
 from collections import OrderedDict
 import datetime as dt
+import multiprocessing
 import numpy as np
 import os
 import pandas as pd
+import queue
 import re
 import sys
 
@@ -24,162 +26,17 @@ MARGIN = 6000
 # The negative to positive ratio
 NP_RATIO = 3
 
+THREAD_COUNT = 10
+
 def collect_TA(ticker, dates):
     # return the technical analysis portion for the ticker to be used in the
     # final input vector
     pass
 
 # TODO:
-# check fees on questrade for each
 # check how to find vega
 
-def _print_progress(exp, legs):
-    leg_strs = []
-    for i in range(len(legs)):
-        leg = legs[i]
-        leg_strs.append(
-            'leg{}: {:<5} ({:>3}%)'.format(
-                i, leg['strike'], int(leg['index']*100/leg['total']))
-        )
-    sys.stdout.write(
-        '\r' + 'expiry: {}, '.format(exp) + ', '.join(leg_strs)
-    )
-
-def determine_profits(legs, margin_filter):
-    n_legs = len(legs)
-    def get_action_premiums(legs, action):
-        '''
-        leg: information about leg (position, df)
-        action: 'open'/'close'
-        '''
-        concat_list = []
-        for l in legs:
-            # Figure out what's going on with this leg
-            leg_df = l['bid_ask']
-            position = l['position']
-
-            # Detemine the corresponding column and credit calculation
-            # multiplier
-            if ((action == 'open' and position == 'long') or
-                    (action == 'close' and position == 'short')):
-                # We're looking to buy and will be debited
-                col = 'ask'
-                multiplier = -1
-            elif ((action == 'open' and position == 'short') or
-                    (action == 'close' and position == 'long')):
-                # We're looking to sell and will be credited
-                col = 'bid'
-                multiplier = 1
-            else:
-                raise ValueError(
-                    'Unknown combination of position ({}) and action ({})'.format(
-                        position, action)
-                )
-
-            concat_list.append(leg_df[col] * multiplier)
-
-        # Build the DataFrame and set the column names to the legs
-        action_df = pd.concat(concat_list, axis=1)
-        action_df.columns = ['leg{}'.format(i+1) for i in range(n_legs)]
-        return action_df
-
-    # Get all of the bid and ask values related to opening a position for each
-    # of the legs.
-    open_df = get_action_premiums(legs, 'open')
-    # Get the last index so that we can remove it after we're done filtering
-    last_time = open_df.index[-1]
-    # Remove the rows of the open_df that correspond to trades that are outside
-    # our margin requirements
-    margin_filter(
-        open_df, pd.concat([l['bid_ask']['ask'] for l in legs], axis=1))
-    # Get rid of rows in which EITHER column is NaN, since we can't actually
-    # open a position here
-    open_df = open_df[np.isnan(open_df).sum(axis=1) == 0]
-    # Finally, remove the row corresponding to the last trade that was available
-    # in the original data (if it still exists). We can't actually use this
-    # trade because there's no data available for how much it would cost to
-    # close it out
-    try:
-        open_df.drop(last_time, inplace=True)
-    except KeyError:
-        # It was already removed by the filtering
-        pass
-
-
-    # Get all of the bid and ask values related to closing a position for each
-    # of the legs. Note that we need to get rid of rows in which BOTH column
-    # is NaN, since they're useless to us. We can still use rows where either
-    # leg is non-NaN to find out the absolute maximum profit we could make if we
-    # didn't need to close all legs sim
-    close_df = get_action_premiums(legs, 'close')
-    close_df = close_df[np.isnan(close_df).sum(axis=1) < n_legs]
-    # For determining the max profit for a simultaneous close, we do actually
-    # need to skip these partial rows
-    sim_close_df = close_df[np.isnan(close_df).sum(axis=1) == 0]
-
-    # Find the amount that we would be credited for opening the trade at each of
-    # the datetimes and then ignore the ones that are out of our price range for
-    # any of the legs
-    element_viability = open_df > -MAX_DEBIT/100
-    viable_open_times = open_df[element_viability.sum(axis=1) == n_legs].index
-
-    if len(viable_open_times) == 0:
-        return None
-
-    # Just because we can open a trade, doesn't mean that we can close it.
-    closable_open_times = []
-
-    viable_leg_open_credits = open_df.loc[viable_open_times]
-    leg_names = open_df.columns
-
-    # Prepare the dictionary that will be used to build the DataFrame. Use an
-    # ordered dict so that we maintain a nice order of columns
-    df_data = OrderedDict()
-    df_data['simul_exit_dt'] = []
-    for name in leg_names:
-        df_data['{}_entry_credit'.format(name)] = []
-        df_data['{}_simul_exit_credit'.format(name)] = []
-        df_data['{}_solo_exit_dt'.format(name)] = []
-        df_data['{}_solo_exit_credit'.format(name)] = []
-
-    for open_time in viable_open_times:
-        # Get the DataFrames representing the closing credits for all datetimes
-        # after the opening time
-        all_closes = close_df.loc[open_time:].iloc[1:]
-        sim_closes = sim_close_df.loc[open_time:].iloc[1:]
-
-        # We can't close this trade if the closing side of one of the legs has
-        # 0 offers
-        if 0 in (np.isnan(all_closes) == False).sum().tolist():
-            continue
-
-        # This is for sure a closable trade
-        closable_open_times.append(open_time)
-
-        # Get the datetime of the absolute maximum for each leg
-        individual_max_dts = all_closes.idxmax()
-
-        # Get the datetime for the simultaneous maximum
-        simultaneous_max_dt = sim_closes.sum(axis=1).idxmax()
-
-        # add all the values for this row of the result dataframe
-        df_data['simul_exit_dt'].append(simultaneous_max_dt)
-        for name in leg_names:
-            df_data['{}_entry_credit'.format(name)].append(
-                viable_leg_open_credits.loc[open_time, name])
-            df_data['{}_simul_exit_credit'.format(name)].append(
-                sim_closes.loc[simultaneous_max_dt, name])
-            df_data['{}_solo_exit_dt'.format(name)].append(
-                individual_max_dts[name])
-            df_data['{}_solo_exit_credit'.format(name)].append(
-                all_closes.loc[individual_max_dts[name], name])
-
-    try:
-        return pd.DataFrame(df_data, index=closable_open_times)
-    except:
-        import pdb; pdb.set_trace()
-
-def get_basic_datetimes(times_strings):
+def _get_basic_datetimes(times_strings):
     dt_match = re.compile(r'\d+-\d+-\d+ \d+:\d+')
     strptime_format = '%Y-%m-%d %H:%M'
     return np.array(list(map(
@@ -191,8 +48,32 @@ def get_basic_datetimes(times_strings):
 def get_stock_prices(ticker, working_dir='pickles'):
     # Get the prices time series for the underlying security of this ticker
     all_stock_prices = pd.read_pickle(os.path.join(working_dir, 'price'))
-    stock_dtimes = get_basic_datetimes(all_stock_prices['datetime'])
+    stock_dtimes = _get_basic_datetimes(all_stock_prices['datetime'])
     return all_stock_prices['ticker'].set_index(stock_dtimes, inplace=True)
+
+def _process_options(data, metadata, dtimes):
+    result = {}
+    for otype in ['C', 'P']:
+        # Filter metadata for this option type
+        type_meta = metadata[metadata['type'] == otype]
+
+        # Get the data (bid, ask) for these strikes
+        bid_df = pd.DataFrame(
+            data[0,:,list(type_meta.index)].T,
+            index = dtimes,
+            columns=type_meta['strike']
+        )
+        ask_df = pd.DataFrame(
+            data[1,:,list(type_meta.index)].T,
+            index = dtimes,
+            columns=type_meta['strike']
+        )
+
+        # Get the DataFrames for all combinations of bid/ask + open/all
+        result[otype] = {
+            'strikes': type_meta['strike'], 'bid': bid_df, 'ask': ask_df}
+
+    return result
 
 # ================================= Single-Leg =================================
 
@@ -221,13 +102,12 @@ def collect_single_legs(ticker, working_dir='pickles'):
 
         # Collect all of the relevant info for this ticker and expiry
         data = np.load(base_path, allow_pickle=True)
-        metadata = pd.read_pickle(base_path + '_meta')
         # In older versions of the metadata, indices do not correspond to the
         # option indices in the numpy array. Resetting them here fixes that and
         # does not affect newer metadata
-        metadata.reset_index(inplace=True, drop=True)
+        metadata = pd.read_pickle(base_path + '_meta').reset_index(drop=True)
         with open(base_path + '_times', 'r') as TF:
-            dtimes = get_basic_datetimes(TF.read().split('\n')[:-1])
+            dtimes = _get_basic_datetimes(TF.read().split('\n')[:-1])
 
         # Make sure all the quantities jive
         assert(data.shape[0] == 10)
@@ -235,256 +115,257 @@ def collect_single_legs(ticker, working_dir='pickles'):
         assert(data.shape[2] == len(metadata))
 
         exp_date = dt.datetime.strptime(exp, '%Y-%m-%d').date()
-        result[exp_date] = {
-            'data': data, 'metadata': metadata, 'datetimes': dtimes}
+
+        # Alright, we now have all the information we need to do some
+        # pre-processing with respect to viability
+        result[exp_date] = _process_options(data, metadata, dtimes)
 
     return result
 
 # ============================== Vertical spreads ==============================
 
-def bull_call_spreads(ticker, working_dir='pickles', vertical=True):
+def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes):
     '''
-    A bull call spread is constructed by buying a call option with a lower
-    strike price (K), and selling another call option with a higher strike
-    price.
+    A thread-safe worker which takes care of collecting profits DataFrames for
+    one of the standard bull/bear call/put spreads.
 
-    Often the call with the lower exercise price will be at-the-money while the
-    call with the higher exercise price is out-of-the-money. Both calls must
-    have the same underlying security and expiration month. If the bull call
-    spread is done so that both the sold and bought calls expire on the same
-    day, it is a vertical debit call spread.
+    The trick here is to provide only the bid_df and ask_df specific to the type
+    of option (i.e., call or put) used by the spread.
 
-    Break even point= Lower strike price+ Net premium paid 
+    Most importantl though is the get_sell_strikes() function, which does the magic of
+    differentiation between the types of spreads. This worker will be walking
+    Through all of the strikes it can for the leg we will _buy_ and will then
+    rely on get_sell_strikes() to return the list of strikes to be used for the leg we
+    will _sell_.
     '''
-    def margin_filter(open_df, asks_df):
-        # Get the market values of the spreads and use this to figure out if we
-        # have enough margin for that trade
-        open_df.drop(
-            asks_df[asks_df.sum(axis=1)*100 > MARGIN].index, inplace=True)
-        # TODO: what the hell is "the spread loss amount, if any, that would
-        #       result if both options were exercised"        
+    trades_concat = []
 
-    # Get all the necessary information to do some processing
-    single_legs = collect_single_legs(ticker, working_dir)
+    print('{:>2}: starting'.format(id))
 
-    # TODO: use to whittle things down to only those calls call that are at or
-    # above the money, as per the description
-    # stock_prices = get_stock_prices(ticker, working_dir)
+    while True:
+        # Grab a strike for the leg we will be buying
+        try:
+            buy_strike = buy_strikes.get()
+        except queue.Empty:
+            break
 
-    concat_list = []
+        # The strikes which we will sell (short)
+        for sell_strike in get_sell_strikes(buy_strike):
 
-    for exp_date, exp_dict in single_legs.items():
-        data = exp_dict['data']
-        meta = exp_dict['metadata']
-        dtimes = exp_dict['datetimes']
+            # Concat how much people are willing to pay for each leg at each
+            # time
+            # TODO: if bid doesn't exist, look at ask?
+            market_values = pd.concat(
+                (bid_df[buy_strike], bid_df[sell_strike]),
+                axis=1
+            )
 
-        # Focus exclusively on calls since this is a call spread
-        call_df = meta[meta['type'] == 'C']
-        for l1_index, leg1 in call_df.iterrows():
-            # This is Leg 1, our lower strike call which we will be longing. Use
-            # its metadata to grab the bid and ask prices from the data array.
+            # Concat the credits (negative if buying) we will receive for
+            # each leg
+            open_credits = pd.concat(
+                (-ask_df[buy_strike], bid_df[sell_strike]),
+                axis=1
+            )
 
-            # Before we continue though, we need to make sure that we can even
-            # afford this trade based on what we've said is the maximum we're
-            # willing to spend for one leg
-            l1_asks = data[1,:,l1_index]
-            if np.nanmin(l1_asks) > MAX_DEBIT/100:
+            # The trade must have both elements existing at the same time
+            # and, combined, their market value must not be over our margin
+            # allowance.
+            # NOTE: this is going to be the DataFrame we submit for the
+            #       viable (but not necessarily profitable) trades for this
+            #       pair of legs. We will be adding a few more columns if we
+            #       for the closing part of the play
+            open_credits = open_credits[
+                (pd.notna(open_credits).all(axis=1)) &
+                (market_values.sum(axis=1) * 100 < MARGIN)
+            ]
+
+            if len(open_credits) == 0:
                 continue
 
-            l1_df = pd.DataFrame(
-                {'bid': data[0,:,l1_index], 'ask': l1_asks},
-                index=dtimes
+            open_sum = open_credits.sum(axis=1)
+            close_credits = pd.concat(
+                (bid_df[buy_strike], -ask_df[sell_strike]),
+                axis=1
             )
-            # Walk through the remaining calls which have a higher strike, as
-            # these will be our potential second legs
-            all_leg2s_df = call_df[call_df['strike'] > leg1['strike']]
 
-            for l2_index, leg2 in all_leg2s_df.iterrows():
-                # This is Leg 2, our higher strike call which we will be
-                # shorting. Use its metadata to grab the bid and ask prices from
-                # the data array.
-                l2_df = pd.DataFrame(
-                    {'bid': data[0, :, l2_index], 'ask': data[1, :, l2_index]},
-                    index=dtimes
-                )
+            # These are the lists that will be used to add new close-side
+            # columns for the open_credits DataFrame
+            close_profits = []
+            close_times = []
 
-                # Finally, get the profits of all of the possible strategies
-                # that could have been used for this combination of legs
-                legs_profits = determine_profits(
-                    [
-                        {
-                            'position': 'long',
-                            'bid_ask': l1_df,
-                            'strike': leg1['strike'],
-                        },
-                        {
-                            'position': 'short',
-                            'bid_ask': l2_df,
-                            'strike': leg2['strike'],
-                        },
-                    ],
-                    margin_filter
-                )
+            # Ok, now for each viable open time, figure out the maximum
+            # profit if we were to:
+            #   a) close at the same time
+            #   b) TODO: close at different times
+            for time_index in open_sum.index:
+                open_profit = open_sum[time_index]
+                # Get the closing trades after this open
+                after_credits = close_credits[time_index:]
 
-                # A return value of None implies that there are no profitable
-                # trades in our price range
-                if legs_profits is None or len(legs_profits) == 0:
+                # Of these closing trades, look at the ones that we can
+                # close at the same time
+                viable_close_credits = after_credits[pd.notna(
+                    after_credits).all(axis=1)]
+
+                # Check to see if there are even any times we can close this
+                # trade
+                if len(viable_close_credits) == 0:
+                    # Remove this as a viable open and move on to the next
+                    # time
+                    open_credits.drop([time_index], inplace=True)
                     continue
 
-                n_trades = len(legs_profits)
+                viable_close_credits = viable_close_credits.sum(axis=1)
 
-                # Add in the expiry columns and option indices for each leg
-                legs_profits['leg1_expiry'] = np.array([exp_date] * n_trades)
-                legs_profits['leg1_index'] = np.array([l1_index] * n_trades)
-                legs_profits['leg2_expiry'] = np.array([exp_date] * n_trades)
-                legs_profits['leg2_index'] = np.array([l2_index] * n_trades)
+                # From whatever is left, find the maxmimum credit received
+                close_profits.append(
+                    viable_close_credits.max() + open_profit)
+                close_times.append(viable_close_credits.idxmax())
 
-                concat_list.append(legs_profits)
+            total_trades = len(close_profits)
 
-    return pd.concat(concat_list)
+            # No viable trades for us with this leg combination
+            if total_trades == 0:
+                continue
 
+            assert(total_trades == len(open_credits))
 
+            # Add the new close columns to the DataFrame and stow it in the
+            # list of dataframes we'll be concatenating
+            open_credits['sell_leg'] = [sell_strike] * total_trades
+            open_credits['profit'] = close_profits
+            open_credits['close'] = close_times
 
+            # The open dataframe still carries the strike number column names
+            open_credits.rename(
+                columns={
+                    buy_strike: 'buy_leg_credit',
+                    sell_strike: 'sell_leg_credit'
+                },
+                inplace=True
+            )
 
-def bull_put_spreads(single_legs, vertical = True):
-    '''
-    A bull put spread is constructed by selling higher striking in-the-money put
-    options and buying the same number of lower striking out-of-the-money put
-    options on the same underlying security with the same expiration date. The
-    options trader employing this strategy hopes that the price of the
-    underlying security goes up far enough that the written put options expire
-    worthless.
+            trades_concat.append(open_credits)
 
-    If the bull put spread is done so that both the sold and bought put expire
-    on the same day, it is a vertical credit put spread.
+        # We've finished up all the possible trades with this buy leg. If there
+        # were any valid trades, the buy-strike dataframe, add the strike price
+        # column and return it to the main thread.
+        total_trades = 0
+        if len(trades_concat) > 0:
+            trades_df = pd.concat(trades_concat)
+            total_trades = len(trades_df)
+            trades_df['buy_leg'] = [buy_strike] * total_trades
+            profits.put(trades_df)
 
-    Break even point = upper strike price - net premium received 
-    '''
-    
+        print('{:>2}: count({}) = {}'.format(id, int(buy_strike), total_trades))
 
-    pass
+    print('{:>2}: done'.format(id))
 
-def bear_call_spreads(ticker, vertical = True):
-    '''
-    A bear call spread is a limited profit, limited risk options trading
-    strategy that can be used when the options trader is moderately bearish on
-    the underlying security. It is entered by buying call options of a certain
-    strike price and selling the same number of call options of lower strike
-    price (in the money) on the same underlying security with the same
-    expiration month. 
-    '''
-    pass
+def collect_spreads(ticker, bull_bear, put_call, working_dir='pickles',
+                    vertical=True):
+    # Error checking
+    try:
+        # Allow for bull, bear, BulL, BEAR, etc
+        bull_bear = bull_bear.strip().lower()
+    except AttributeError:
+        raise TypeError(
+            '`bull_bear` must be a string, not {}.'.format(
+                put_call.__class__.__name__)
+        )
+    try:
+        # Allow for P, C, put, call, PuT, cAll, etc
+        PC_char = put_call.strip().upper()[0]
+    except AttributeError:
+        raise TypeError(
+            '`put_call` must be a string, not {}.'.format(
+                put_call.__class__.__name__)
+        )
+    except IndexError:
+        raise ValueError('`put_call` cannot be an empty string.')
 
-def bear_put_spreads(ticker, working_dir='pickles', vertical=True):
-    '''
-    A bear put spread is a limited profit, limited risk options trading strategy
-    that can be used when the options trader is moderately bearish on the
-    underlying security. It is entered by:
+    if bull_bear not in ('bull', 'bear'):
+        raise ValueError(
+            '`bull_bear` must be in ["bull", "bear"] (case-insensitive)')
+    if PC_char not in ('P', 'C'):
+        raise ValueError(('`put_call` must be in ["p", "c", "put", "call"] '
+                          '(case-insensitive)'))
 
-    - buying higher striking in-the-money put options and
-    - selling the same number of lower striking out-of-the-money put options on
-      the same underlying security and the same expiration month.
-    '''
-
-    def margin_filter(open_df, asks_df):
-        # Get the market values of the spreads and use this to figure out if we
-        # have enough margin for that trade
-        open_df.drop(
-            asks_df[asks_df.sum(axis=1)*100 > MARGIN].index, inplace=True)
-        # TODO: what the hell is "the spread loss amount, if any, that would
-        #       result if both options were exercised"        
-
-    # Get all the necessary information to do some processing
+    # Get all the necessary information to do some processing.
     single_legs = collect_single_legs(ticker, working_dir)
 
-    # TODO: use to whittle things down to only those puts put that are at or
-    # above the money, as per the description
+    # TODO: use to whittle things down to only those calls that are at or above
+    # the money, as per the description
     # stock_prices = get_stock_prices(ticker, working_dir)
 
-    concat_list = []
+    # Ok, we got all of the data and metadata, so we're good to go. Let's build
+    # the lambda we will use to get the sell strike from the buy strike and the
+    # set of all strikes. Guido doesn't like multi-line lambdas, so we can't
+    # make a lambda that generates a lambda AND use verbose variable names.
+    if bull_bear == 'bull':
+        # Buy LOWER strike call/put, sell HIGHER strike call/put
+        def get_sell_strikes_gen(strikes):
+            return lambda buy_strike: strikes[strikes > buy_strike]
+    else:
+        # Buy HIGHER strike call/put, sell LOWER strike call/put
+        def get_sell_strikes_gen(strikes):
+            return lambda buy_strike: strikes[strikes < buy_strike]
+
+    result_concat = []
+
+    # Build the thread-specific objects.
+
+    # First we need a Queue of the strikes to be used for the buying leg.
+    buy_strikes = multiprocessing.Queue()
+
+    # And the threads will put their resulting DataFrames into this queue
+    exp_profits = multiprocessing.Queue()
 
     for exp_date, exp_dict in single_legs.items():
-        data = exp_dict['data']
-        meta = exp_dict['metadata']
-        dtimes = exp_dict['datetimes']
-
         # Focus exclusively on puts since this is a put spread
-        put_df = meta[meta['type'] == 'P']
-        leg1_count = len(put_df)
-        for l1_index, leg1 in put_df.iterrows():
-            # This is Leg 1, our lower strike put which we will be longing. Use
-            # its metadata to grab the bid and ask prices from the data array.
+        exp_info = exp_dict[PC_char]
 
-            # Before we continue though, we need to make sure that we can even
-            # afford this trade based on what we've said is the maximum we're
-            # willing to spend for one leg
-            l1_asks = data[1,:,l1_index]
-            if np.nanmin(l1_asks) > MAX_DEBIT/100:
-                continue
+        bid_df = exp_info['bid']
+        ask_df = exp_info['ask']
 
-            l1_df = pd.DataFrame(
-                {'bid': data[0,:,l1_index], 'ask': l1_asks},
-                index=dtimes
+        # Pull out the relevant info
+        all_strikes = exp_info['strikes']
+
+        # Load in the buy-leg strikes so that the threads can pull them out
+        for s in all_strikes:
+            buy_strikes.put(s)
+
+        processes = []
+        for i in range(THREAD_COUNT):
+            p = multiprocessing.Process(
+                target=spread_worker,
+                args=(i, bid_df, ask_df, buy_strikes, exp_profits,
+                      get_sell_strikes_gen(all_strikes),)
             )
-            # Walk through the remaining puts which have a lower strike, as
-            # these will be our potential second legs
-            all_leg2s_df = put_df[put_df['strike'] < leg1['strike']]
-            for l2_index, leg2 in all_leg2s_df.iterrows():
-                _print_progress(exp_date, [
-                    {
-                        'strike': leg1['strike'],
-                        'index': l1_index,
-                        'total': leg1_count
-                    },
-                    {
-                        'strike': leg2['strike'],
-                        'index': l2_index,
-                        'total': all_leg2s_df.index[-1]
-                    },
-                ])
-                # This is Leg 2, our higher strike put which we will be
-                # shorting. Use its metadata to grab the bid and ask prices from
-                # the data array.
-                l2_df = pd.DataFrame(
-                    {'bid': data[0, :, l2_index], 'ask': data[1, :, l2_index]},
-                    index=dtimes
-                )
+            p.start()
+            processes.append(p)
 
+        for p in processes:
+            p.join()
 
-                # Finally, get the profits of all of the possible strategies
-                # that could have been used for this combination of legs
-                legs_profits = determine_profits(
-                    [
-                        {
-                            'position': 'long',
-                            'bid_ask': l1_df,
-                            'strike': leg1['strike'],
-                        },
-                        {
-                            'position': 'short',
-                            'bid_ask': l2_df,
-                            'strike': leg2['strike'],
-                        },
-                    ],
-                    margin_filter
-                )
+        # Did we even get any trades out of this expiry?
+        if exp_profits.qsize() == 0:
+            continue
 
-                # A return value of None implies that there are no profitable
-                # trades in our price range
-                if legs_profits is None or len(legs_profits) == 0:
-                    continue
+        # Pull the DataFrames out of the Queue such that we can concat them into
+        # one, expiry DataFrame and also empty the Queue for the next expiry
+        concat_list = []
+        while True:
+            try:
+                concat_list.append(exp_profits.get())
+            except queue.Empty:
+                break
 
-                n_trades = len(legs_profits)
+        exp_df = pd.concat(concat_list)
+        exp_df['expiry'] = [exp_date] * len(exp_df)
 
-                # Add in the expiry columns and option indices for each leg
-                legs_profits['leg1_expiry'] = np.array([exp_date] * n_trades)
-                legs_profits['leg1_index'] = np.array([l1_index] * n_trades)
-                legs_profits['leg2_expiry'] = np.array([exp_date] * n_trades)
-                legs_profits['leg2_index'] = np.array([l2_index] * n_trades)
+        result_concat.append(exp_df)
 
-                concat_list.append(legs_profits)
-
-        return pd.concat(concat_list)
+    return pd.concat(result_concat)
 
 def bull_bear_phase_spread(ticker):
     '''
