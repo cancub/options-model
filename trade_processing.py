@@ -26,8 +26,6 @@ MARGIN = 6000
 # The negative to positive ratio
 NP_RATIO = 3
 
-THREAD_COUNT = 10
-
 def collect_TA(ticker, dates):
     # return the technical analysis portion for the ticker to be used in the
     # final input vector
@@ -138,131 +136,123 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes):
     rely on get_sell_strikes() to return the list of strikes to be used for the leg we
     will _sell_.
     '''
-    trades_concat = []
-
-    print('{:>2}: starting'.format(id))
+    trades_data = {
+        'open_time': [],
+        'long_strike': [],
+        'short_strike': [],
+        'max_profit': [],
+        'close_time': [],
+    }
 
     while True:
-        # Grab a strike for the leg we will be buying
+        # Grab a strike for the leg we will be longing
         try:
-            buy_strike = buy_strikes.get()
+            buy_strike = buy_strikes.get(timeout=1)
         except queue.Empty:
             break
+        # print('{:>2}: checking {}'.format(id, int(buy_strike)))
 
-        # The strikes which we will sell (short)
-        for sell_strike in get_sell_strikes(buy_strike):
+        total_trades = 0
+        long_bids = bid_df[buy_strike]
 
-            # Concat how much people are willing to pay for each leg at each
-            # time
-            # TODO: if bid doesn't exist, look at ask?
-            market_values = pd.concat(
-                (bid_df[buy_strike], bid_df[sell_strike]),
-                axis=1
-            )
+        # Get the strikes for the legs we will sell short in combinations with
+        # the long leg
+        all_sell_strikes = get_sell_strikes(buy_strike)
 
-            # Concat the credits (negative if buying) we will receive for
-            # each leg
-            open_credits = pd.concat(
-                (-ask_df[buy_strike], bid_df[sell_strike]),
-                axis=1
-            )
+        if all_sell_strikes.size == 0:
+            print('{:>2}: count({}) = 0'.format(id, int(buy_strike)))
+            continue
 
-            # The trade must have both elements existing at the same time
-            # and, combined, their market value must not be over our margin
-            # allowance.
-            # NOTE: this is going to be the DataFrame we submit for the
-            #       viable (but not necessarily profitable) trades for this
-            #       pair of legs. We will be adding a few more columns if we
-            #       for the closing part of the play
-            open_credits = open_credits[
-                (pd.notna(open_credits).all(axis=1)) &
-                (market_values.sum(axis=1) * 100 < MARGIN)
-            ]
+        short_bids = bid_df[all_sell_strikes]
 
-            if len(open_credits) == 0:
+        # Subtract the value we're paying to open the long leg of the trade
+        open_credits = short_bids.sub(ask_df[buy_strike], axis='rows')
+
+        # Set all of the too-expensive opens to NaN so that we can ignore them
+        margin_not_ok = short_bids.add(long_bids, axis='rows') * 100 > MARGIN
+        open_credits[margin_not_ok] = np.nan
+
+        # Get rid of all timepoints that have no viable opens for any
+        # combination
+        open_credits.dropna(axis=0, how='all', inplace=True)
+        viable_opens = open_credits.index
+
+        if len(viable_opens) == 0:
+            print('{:>2}: count({}) = 0'.format(id, int(buy_strike)))
+            continue
+
+        # We know that there is at least one short strike that is viable. So now
+        # we get rid of short strikes representing combinations that have no
+        # viable opens
+        open_credits.dropna(axis=1, how='all', inplace=True)
+        viable_strikes = open_credits.columns
+
+        # Get all the (negative) credits from buying options to close out the
+        # short legs
+        short_asks = -ask_df[viable_strikes]
+
+        # These are the lists that will be used to add new close-side
+        # columns for the open_credits DataFrame
+
+        # Ok, now for each viable open time, figure out the maximum
+        # profit if we were to:
+        #   a) close at the same time
+        #   b) TODO: close at different times
+        for open_time in viable_opens:
+            # Whittle the long option bids df down to the timepoints that we can
+            # use for closing trades
+            # NOTE: we can't close a trade right after we open it, hence
+            #       skipping the first open time with .iloc[1:]
+            close_long_bids = long_bids[open_time:].iloc[1:]
+            if close_long_bids.shape[0] == 0:
                 continue
+            first_close_time = close_long_bids.index[0]
 
-            open_sum = open_credits.sum(axis=1)
-            close_credits = pd.concat(
-                (bid_df[buy_strike], -ask_df[sell_strike]),
-                axis=1
-            )
+            # Figure out how much credit we would receive for closing out the
+            # trades at each of the viable close times
+            close_credits = short_asks.loc[first_close_time:].add(
+                close_long_bids, axis='rows')
 
-            # These are the lists that will be used to add new close-side
-            # columns for the open_credits DataFrame
-            close_profits = []
-            close_times = []
+            # Take the maximum total close credits for each strike and add them
+            # to theit respective total open credits
+            max_profits = open_credits.loc[open_time].add(close_credits.max())
+            # Get rid of the trades we weren't able to close out using this
+            # opening time
+            max_profits.dropna(inplace=True)
 
-            # Ok, now for each viable open time, figure out the maximum
-            # profit if we were to:
-            #   a) close at the same time
-            #   b) TODO: close at different times
-            for time_index in open_sum.index:
-                open_profit = open_sum[time_index]
-                # Get the closing trades after this open
-                after_credits = close_credits[time_index:]
+            # Get the times associated with the above profits
+            max_profit_closes = close_credits.idxmax()[max_profits.index]
 
-                # Of these closing trades, look at the ones that we can
-                # close at the same time
-                viable_close_credits = after_credits[pd.notna(
-                    after_credits).all(axis=1)]
+            total_trades_for_open = len(max_profits)
 
-                # Check to see if there are even any times we can close this
-                # trade
-                if len(viable_close_credits) == 0:
-                    # Remove this as a viable open and move on to the next
-                    # time
-                    open_credits.drop([time_index], inplace=True)
-                    continue
+            total_trades += total_trades_for_open
 
-                viable_close_credits = viable_close_credits.sum(axis=1)
+            # Finally, add all of the data to the dict
+            trades_data['open_time'] += [open_time] * total_trades_for_open
+            trades_data['short_strike'] += max_profits.index.tolist()
+            trades_data['max_profit'] += max_profits.tolist()
+            trades_data['close_time'] += max_profit_closes.tolist()
 
-                # From whatever is left, find the maxmimum credit received
-                close_profits.append(
-                    viable_close_credits.max() + open_profit)
-                close_times.append(viable_close_credits.idxmax())
-
-            total_trades = len(close_profits)
-
-            # No viable trades for us with this leg combination
-            if total_trades == 0:
-                continue
-
-            assert(total_trades == len(open_credits))
-
-            # Add the new close columns to the DataFrame and stow it in the
-            # list of dataframes we'll be concatenating
-            open_credits['sell_leg'] = [sell_strike] * total_trades
-            open_credits['profit'] = close_profits
-            open_credits['close'] = close_times
-
-            # The open dataframe still carries the strike number column names
-            open_credits.rename(
-                columns={
-                    buy_strike: 'buy_leg_credit',
-                    sell_strike: 'sell_leg_credit'
-                },
-                inplace=True
-            )
-
-            trades_concat.append(open_credits)
+            # Check that the lengths still match
+            new_length = len(trades_data['open_time'])
+            for k, v in trades_data.items():
+                # We haven't added the long strikes yet
+                if k != 'long_strike' and new_length != len(v):
+                    import pdb; pdb.set_trace()
 
         # We've finished up all the possible trades with this buy leg. If there
         # were any valid trades, the buy-strike dataframe, add the strike price
         # column and return it to the main thread.
-        total_trades = 0
-        if len(trades_concat) > 0:
-            trades_df = pd.concat(trades_concat)
-            total_trades = len(trades_df)
-            trades_df['buy_leg'] = [buy_strike] * total_trades
-            profits.put(trades_df)
+        if total_trades > 0:
+            trades_data['long_strike'] += [buy_strike] * total_trades
 
         print('{:>2}: count({}) = {}'.format(id, int(buy_strike), total_trades))
 
+    profits.put(pd.DataFrame(trades_data).set_index('open_time'))
     print('{:>2}: done'.format(id))
 
 def collect_spreads(ticker, bull_bear, put_call, working_dir='pickles',
-                    vertical=True):
+                    vertical=True, num_procs = 10):
     # Error checking
     try:
         # Allow for bull, bear, BulL, BEAR, etc
@@ -334,35 +324,36 @@ def collect_spreads(ticker, bull_bear, put_call, working_dir='pickles',
         for s in all_strikes:
             buy_strikes.put(s)
 
-        processes = []
-        for i in range(THREAD_COUNT):
-            p = multiprocessing.Process(
-                target=spread_worker,
-                args=(i, bid_df, ask_df, buy_strikes, exp_profits,
-                      get_sell_strikes_gen(all_strikes),)
-            )
-            p.start()
-            processes.append(p)
-
-        for p in processes:
-            p.join()
-
-        # Did we even get any trades out of this expiry?
-        if exp_profits.qsize() == 0:
-            continue
-
-        # Pull the DataFrames out of the Queue such that we can concat them into
-        # one, expiry DataFrame and also empty the Queue for the next expiry
         concat_list = []
-        while True:
-            try:
+        if num_procs > 1:
+            processes = []
+            for i in range(num_procs):
+                p = multiprocessing.Process(
+                    target=spread_worker,
+                    args=(i, bid_df, ask_df, buy_strikes, exp_profits,
+                        get_sell_strikes_gen(all_strikes),)
+                )
+                p.start()
+                processes.append(p)
+
+            # This is going to be a lot of buffered data in the Queue. The
+            # poster on this topic https://stackoverflow.com/a/26738946
+            # mentioned that we may need to read from the Queue *before* joining
+            # Maybe the better solution is to reference a semaphor
+            for _ in range(num_procs):
                 concat_list.append(exp_profits.get())
-            except queue.Empty:
-                break
+
+            for p in processes:
+                p.join()
+        else:
+            spread_worker(0, bid_df, ask_df, buy_strikes, exp_profits,
+                          get_sell_strikes_gen(all_strikes),)
+
 
         exp_df = pd.concat(concat_list)
         exp_df['expiry'] = [exp_date] * len(exp_df)
 
+        import pdb; pdb.set_trace()
         result_concat.append(exp_df)
 
     return pd.concat(result_concat)
