@@ -2,6 +2,7 @@ pickles/
 backups/
 papers/
 testing/
+trades/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
