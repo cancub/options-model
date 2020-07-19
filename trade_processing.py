@@ -237,52 +237,57 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
     if verbose:
         print('{:>2}: done'.format(id))
 
-def collect_spreads(data_path, bull_bear, put_call, vertical=True,
-                    num_procs = 10, verbose=False):
+def collect_spreads(data_path, directions=['bull', 'bear'], options=['c','p'],
+                    vertical=True, num_procs = 10, verbose=False):
     # Error checking
-    try:
-        # Allow for bull, bear, BulL, BEAR, etc
-        bull_bear = bull_bear.strip().lower()
-    except AttributeError:
+    if not isinstance(directions, list):
         raise TypeError(
-            '`bull_bear` must be a string, not {}.'.format(
-                put_call.__class__.__name__)
+            '`directions` must be a list. Got {}'.format(
+                directions.__class__.__name__)
         )
-    try:
-        # Allow for P, C, put, call, PuT, cAll, etc
-        PC_char = put_call.strip().upper()[0]
-    except AttributeError:
+    if not isinstance(options, list):
         raise TypeError(
-            '`put_call` must be a string, not {}.'.format(
-                put_call.__class__.__name__)
+            '`options` must be a list. Got {}'.format(
+                options.__class__.__name__)
         )
-    except IndexError:
-        raise ValueError('`put_call` cannot be an empty string.')
+    if len(directions) == 0:
+        print('No directions specified. Exiting')
+    if len(options) == 0:
+        print('No options specified. Exiting')
+    for i in range(len(directions)):
+        try:
+            # Allow for bull, bear, BulL, BEAR, etc
+            directions[i] = directions[i].strip().lower()
+        except AttributeError:
+            raise TypeError(
+                '`directions` elements must be strings, not {}.'.format(
+                    directions[i].__class__.__name__)
+            )
+        if directions[i] not in ('bull', 'bear'):
+            raise ValueError(
+                ('`directions` elements must be in ["bull", "bear"] '
+                 '(case-insensitive)')
+            )
+    for i in range(len(options)):
+        try:
+            # Allow for P, C, put, call, PuT, cAll, etc
+            options[i] = options[i].strip().upper()[0]
+        except AttributeError:
+            raise TypeError(
+                '`options` elements must be strings, not {}.'.format(
+                    options[i].__class__.__name__)
+            )
+        except IndexError:
+            raise ValueError('`options` elements cannot be an empty string.')
+        if options[i] not in ('P', 'C'):
+            raise ValueError(
+                ('`options` elements must be in ["p", "c", "put", "call"] '
+                 '(case-insensitive)')
+            )
 
-    if bull_bear not in ('bull', 'bear'):
-        raise ValueError(
-            '`bull_bear` must be in ["bull", "bear"] (case-insensitive)')
-    if PC_char not in ('P', 'C'):
-        raise ValueError(('`put_call` must be in ["p", "c", "put", "call"] '
-                          '(case-insensitive)'))
-
-    # Get all the necessary information to do some processing.
-    single_legs = collect_single_legs(data_path)[PC_char]
-
-    # Ok, we got all of the data and metadata, so we're good to go. Let's build
-    # the lambda we will use to get the sell strike from the buy strike and the
-    # set of all strikes. Guido doesn't like multi-line lambdas, so we can't
-    # make a lambda that generates a lambda AND use verbose variable names.
-    if bull_bear == 'bull':
-        # Buy LOWER strike call/put, sell HIGHER strike call/put
-        def get_sell_strikes_gen(strikes):
-            return lambda buy_strike: strikes[strikes > buy_strike]
-    else:
-        # Buy HIGHER strike call/put, sell LOWER strike call/put
-        def get_sell_strikes_gen(strikes):
-            return lambda buy_strike: strikes[strikes < buy_strike]
-
-    # Build the thread-specific objects.
+    # We're good to go. Start by building the thread-specific objects. We may
+    # not be using threads, but even in this case the same thread objects can
+    # be used.
 
     # First we need a Queue of the strikes to be used for the buying leg.
     buy_strikes = multiprocessing.Queue()
@@ -290,42 +295,80 @@ def collect_spreads(data_path, bull_bear, put_call, vertical=True,
     # And the threads will put their resulting DataFrames into this queue
     profits = multiprocessing.Queue()
 
-    bid_df = single_legs['bid']
-    ask_df = single_legs['ask']
+    # Get all the necessary information to do some processing.
+    single_legs = collect_single_legs(data_path)
 
-    # Pull out the relevant info
-    all_strikes = single_legs['strikes']
+    result_df_list = []
 
-    # Load in the buy-leg strikes so that the threads can pull them out
-    for s in all_strikes:
-        buy_strikes.put(s)
+    for o in options:
 
-    concat_list = []
-    if num_procs > 1:
-        processes = []
-        for i in range(num_procs):
-            p = multiprocessing.Process(
-                target=spread_worker,
-                args=(i, bid_df, ask_df, buy_strikes, profits,
-                    get_sell_strikes_gen(all_strikes),)
-            )
-            p.start()
-            processes.append(p)
+        # There's no good way to word this
+        spread_legs = single_legs[o]
 
-        # This is going to be a lot of buffered data in the Queue. The
-        # poster on this topic https://stackoverflow.com/a/26738946
-        # mentioned that we may need to read from the Queue *before* joining
-        # Maybe the better solution is to reference a semaphor
-        for _ in range(num_procs):
-            concat_list.append(profits.get())
+        for d in directions:
 
-        for p in processes:
-            p.join()
-    else:
-        spread_worker(0, bid_df, ask_df, buy_strikes, profits,
-                      get_sell_strikes_gen(all_strikes), verbose)
+            if verbose:
+                print(
+                    'Working on a {} {} spread'.format(
+                        d, 'call' if o == 'C' else 'put')
+                )
 
-    result_df = pd.concat(concat_list)
+            # Ok, we got all of the data and metadata, so we're good to go.
+            # Let's build the lambda we will use to get the sell strike from the
+            # buy strike and the set of all strikes. Guido doesn't like
+            # multi-line lambdas, so we can't make a lambda that generates a
+            # lambda AND use verbose variable names.
+            if d == 'bull':
+                # Buy LOWER strike call/put, sell HIGHER strike call/put
+                def get_sell_strikes_gen(strikes):
+                    return lambda buy_strike: strikes[strikes > buy_strike]
+            else:
+                # Buy HIGHER strike call/put, sell LOWER strike call/put
+                def get_sell_strikes_gen(strikes):
+                    return lambda buy_strike: strikes[strikes < buy_strike]
+
+            bid_df = spread_legs['bid']
+            ask_df = spread_legs['ask']
+
+            # Pull out the relevant info
+            all_strikes = spread_legs['strikes']
+
+            # Load in the buy-leg strikes so that the threads can pull them out
+            for s in all_strikes:
+                buy_strikes.put(s)
+
+            spread_list = []
+            if num_procs > 1:
+                processes = []
+                for i in range(num_procs):
+                    p = multiprocessing.Process(
+                        target=spread_worker,
+                        args=(i, bid_df, ask_df, buy_strikes, profits,
+                            get_sell_strikes_gen(all_strikes), verbose,)
+                    )
+                    p.start()
+                    processes.append(p)
+
+                # This is going to be a lot of buffered data in the Queue. The
+                # poster on this topic https://stackoverflow.com/a/26738946
+                # mentioned that we may need to read from the Queue *before* joining
+                # Maybe the better solution is to reference a semaphor
+                for _ in range(num_procs):
+                    spread_list.append(profits.get())
+
+                for p in processes:
+                    p.join()
+            else:
+                spread_worker(0, bid_df, ask_df, buy_strikes, profits,
+                            get_sell_strikes_gen(all_strikes), verbose)
+
+            spread_df = pd.concat(spread_list)
+            spread_df['direction'] = d
+            spread_df['option'] = o
+
+            result_df_list.append(spread_df)
+
+    result_df = pd.concat(result_df_list)
 
     # Show the true values of the trade
     result_df['open_credit'] *= 100
