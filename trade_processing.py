@@ -145,8 +145,12 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
         open_credits = short_bids.sub(ask_df[buy_strike], axis='rows')
 
         # Set all of the too-expensive opens to NaN so that we can ignore them
-        margin_not_ok = short_bids.add(long_bids, axis='rows') * 100 > MARGIN
-        open_credits[margin_not_ok] = np.nan
+        # Note that we need to fill all the NaN in this original bid DataFrames
+        # with 0 so that we don't make the mistake of counting
+        #   3 gagillion + NaN = NaN
+        # as "OK"
+        open_margin = short_bids.fillna(0).add(long_bids.fillna(0), axis='rows')
+        open_credits[open_margin * 100 > MARGIN] = np.nan
 
         # Get rid of all timepoints that have no viable opens for any
         # combination
