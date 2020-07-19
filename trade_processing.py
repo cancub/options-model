@@ -12,7 +12,7 @@ import sys
 #   ex: 1 contract : 9.95 + 1 = 10.95
 #       2 contract : 9.95 + 2 = 11.95
 # So for both entre and exit of one contracts
-FEE = 2 * (9.95 + 1)
+FEE =  9.95 + 1
 
 # The required profit that we want
 MIN_PROFIT = 100
@@ -372,6 +372,7 @@ def collect_spreads(data_path, directions=['bull', 'bear'], options=['c','p'],
 
     # Show the true values of the trade
     result_df['open_credit'] *= 100
+    result_df['open_credit'] -= FEE
     result_df['max_profit'] *= 100
     result_df['max_profit'] -= FEE
 
