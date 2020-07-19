@@ -358,11 +358,12 @@ def collect_spreads(data_path, directions=['bull', 'bear'], options=['c','p'],
 
                 for p in processes:
                     p.join()
+                spread_df = pd.concat(spread_list)
             else:
                 spread_worker(0, bid_df, ask_df, buy_strikes, profits,
                             get_sell_strikes_gen(all_strikes), verbose)
+                spread_df = profits.get()
 
-            spread_df = pd.concat(spread_list)
             spread_df['direction'] = d
             spread_df['option'] = o
 
