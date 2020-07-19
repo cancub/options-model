@@ -113,6 +113,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
     '''
     trades_data = {
         'open_time': [],
+        'open_margin': [],
         'open_credit': [],
         'long_strike': [],
         'short_strike': [],
@@ -199,13 +200,19 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
             # Get rid of the trades we weren't able to close out using this
             # opening time
             max_profits.dropna(inplace=True)
+            max_profits_strikes = max_profits.index
 
             # Get the times associated with the above profits
-            max_profit_closes = close_credits.idxmax()[max_profits.index]
+            max_profit_closes = close_credits.idxmax()[max_profits_strikes]
 
             # Use only the elements from the open credits that correspond the to
             # strikes we were unable to use
-            open_time_credits = open_credits.loc[open_time, max_profits.index]
+            open_time_credits = open_credits.loc[open_time, max_profits_strikes]
+            open_time_margin = open_margin.loc[open_time, max_profits_strikes]
+
+            # Double check that we didn't mess this up earlier
+            if open_time_margin.max()*100 > MARGIN:
+                raise Exception('Error with maximum open credit')
 
             total_trades_for_open = len(max_profits)
 
@@ -213,9 +220,9 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
 
             # Finally, add all of the data to the dict
             trades_data['open_time'] += [open_time] * total_trades_for_open
-            trades_data['open_credit'] += open_time_credits[
-                max_profits.index].tolist()
-            trades_data['short_strike'] += max_profits.index.tolist()
+            trades_data['open_margin'] += open_time_margin.tolist()
+            trades_data['open_credit'] += open_time_credits.tolist()
+            trades_data['short_strike'] += max_profits_strikes.tolist()
             trades_data['max_profit'] += max_profits.tolist()
             trades_data['close_time'] += max_profit_closes.tolist()
 
@@ -362,6 +369,7 @@ def collect_spreads(data_path, directions=['bull', 'bear'], options=['c','p'],
 
                 for p in processes:
                     p.join()
+
                 spread_df = pd.concat(spread_list)
             else:
                 spread_worker(0, bid_df, ask_df, buy_strikes, profits,
@@ -376,6 +384,7 @@ def collect_spreads(data_path, directions=['bull', 'bear'], options=['c','p'],
     result_df = pd.concat(result_df_list)
 
     # Show the true values of the trade
+    result_df['open_margin'] *= 100
     result_df['open_credit'] *= 100
     result_df['open_credit'] -= FEE
     result_df['max_profit'] *= 100
