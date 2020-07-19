@@ -10,8 +10,8 @@ import trade_processing as tp
 parser = argparse.ArgumentParser()
 parser.add_argument('-o', '--option', choices=['c', 'p', 'call', 'put'])
 parser.add_argument('-d', '--direction', choices=['bull', 'bear'])
-parser.add_argument('-c', '--max-cost', type=float,
-    help='The maximum cost to open the trade.')
+parser.add_argument('-c', '--max-margin', type=float,
+    help='The maximum margin to open the trade.')
 parser.add_argument('-p', '--min-profit', type=float,
     help='The minimum profit for the data to display')
 parser.add_argument('-m', '--multiproc-threads', type=int, default=10)
@@ -55,8 +55,8 @@ if not os.path.exists(df_path):
 else:
     df = pd.read_pickle(df_path)
 
-if args.max_cost is not None:
-    df = df[df['open_credit'] > -args.max_cost]
+if args.max_margin is not None:
+    df = df[df['open_margin'] < args.max_margin]
 if args.option is not None:
     df = df[df['option'] == args.option.upper()[0]]
 if args.direction is not None:
@@ -79,7 +79,7 @@ if args.show_stats:
 
 if args.show_plots:
     df.hist(
-        column=['open_credit', 'max_profit'],
+        column=['open_credit', 'open_margin', 'max_profit'],
         sharey=True,
         bins=args.bins,
     )
