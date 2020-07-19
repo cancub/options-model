@@ -138,6 +138,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes):
     '''
     trades_data = {
         'open_time': [],
+        'open_credits': [],
         'long_strike': [],
         'short_strike': [],
         'max_profit': [],
@@ -223,12 +224,18 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes):
             # Get the times associated with the above profits
             max_profit_closes = close_credits.idxmax()[max_profits.index]
 
+            # Use only the elements from the open credits that correspond the to
+            # strikes we were unable to use
+            open_time_credits = open_credits.loc[open_time, max_profits.index]
+
             total_trades_for_open = len(max_profits)
 
             total_trades += total_trades_for_open
 
             # Finally, add all of the data to the dict
             trades_data['open_time'] += [open_time] * total_trades_for_open
+            trades_data['open_credits'] += open_time_credits[
+                max_profits.index].tolist()
             trades_data['short_strike'] += max_profits.index.tolist()
             trades_data['max_profit'] += max_profits.tolist()
             trades_data['close_time'] += max_profit_closes.tolist()
@@ -349,11 +356,9 @@ def collect_spreads(ticker, bull_bear, put_call, working_dir='pickles',
             spread_worker(0, bid_df, ask_df, buy_strikes, exp_profits,
                           get_sell_strikes_gen(all_strikes),)
 
-
         exp_df = pd.concat(concat_list)
         exp_df['expiry'] = [exp_date] * len(exp_df)
 
-        import pdb; pdb.set_trace()
         result_concat.append(exp_df)
 
     return pd.concat(result_concat)
