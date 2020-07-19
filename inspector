@@ -14,6 +14,7 @@ parser.add_argument('-c', '--max-cost', type=float,
     help='The maximum cost to open the trade.')
 parser.add_argument('-p', '--min-profit', type=float,
     help='The minimum profit for the data to display')
+parser.add_argument('-m', '--multiproc-threads', type=int, default=10)
 parser.add_argument('-t', '--dte', nargs=2, type=int, metavar=('MIN', 'MAX'),
     help=('The minimum and maximum number of days until the expiry for the '
           'trade, respectively, from when the trade is made. Use -1 for either '
@@ -38,7 +39,7 @@ PICKLES_DIR = 'testing/pickles'
 def generate_trades(ticker, expiry):
     trades = tp.collect_spreads(
         data_path=os.path.join(PICKLES_DIR, str(expiry), ticker),
-        num_procs=10,
+        num_procs=args.multiproc_threads,
         verbose=args.verbose,
     )
     trades.to_pickle(
