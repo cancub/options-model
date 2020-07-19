@@ -75,54 +75,29 @@ def _process_options(data, metadata, dtimes):
 
 # ================================= Single-Leg =================================
 
-def collect_single_legs(ticker, working_dir='pickles'):
-    working_dir = os.path.abspath(working_dir)
-    expiries = sorted(os.listdir(working_dir))
+def collect_single_legs(data_path):
+    # Collect all of the relevant info for this ticker and expiry
+    data = np.load(data_path, allow_pickle=True)
+    # In older versions of the metadata, indices do not correspond to the
+    # option indices in the numpy array. Resetting them here fixes that and
+    # does not affect newer metadata
+    metadata = pd.read_pickle(data_path + '_meta').reset_index(drop=True)
+    with open(data_path + '_times', 'r') as TF:
+        dtimes = _get_basic_datetimes(TF.read().split('\n')[:-1])
 
-    # We need to confirm that this is indeed an expiries home directory, which
-    # must contain the prices of all stocks in a file called prices
-    if 'price' not in expiries:
-        raise TypeError(
-            '{} is not a valid working directory'.format(working_dir))
+    # Make sure all the quantities jive
+    assert(data.shape[0] == 10)
+    assert(data.shape[1] == len(dtimes))
+    assert(data.shape[2] == len(metadata))
 
-    ticker = ticker.upper()
-
-    # Use an ordered dictionary to maintain the order of the sorted list of
-    # expiry dates
-    result = OrderedDict()
-
-    for exp in (e for e in expiries if e != 'price'):
-        # If this expiry doesn't have info on our ticker, then it's not an
-        # expiry that we want to associate with
-        base_path = os.path.join(working_dir, exp, ticker)
-        if not os.path.exists(base_path):
-            continue
-
-        # Collect all of the relevant info for this ticker and expiry
-        data = np.load(base_path, allow_pickle=True)
-        # In older versions of the metadata, indices do not correspond to the
-        # option indices in the numpy array. Resetting them here fixes that and
-        # does not affect newer metadata
-        metadata = pd.read_pickle(base_path + '_meta').reset_index(drop=True)
-        with open(base_path + '_times', 'r') as TF:
-            dtimes = _get_basic_datetimes(TF.read().split('\n')[:-1])
-
-        # Make sure all the quantities jive
-        assert(data.shape[0] == 10)
-        assert(data.shape[1] == len(dtimes))
-        assert(data.shape[2] == len(metadata))
-
-        exp_date = dt.datetime.strptime(exp, '%Y-%m-%d').date()
-
-        # Alright, we now have all the information we need to do some
-        # pre-processing with respect to viability
-        result[exp_date] = _process_options(data, metadata, dtimes)
-
-    return result
+    # Alright, we now have all the information we need to do some
+    # pre-processing with respect to viability
+    return _process_options(data, metadata, dtimes)
 
 # ============================== Vertical spreads ==============================
 
-def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes):
+def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
+                  verbose=False):
     '''
     A thread-safe worker which takes care of collecting profits DataFrames for
     one of the standard bull/bear call/put spreads.
@@ -138,7 +113,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes):
     '''
     trades_data = {
         'open_time': [],
-        'open_credits': [],
+        'open_credit': [],
         'long_strike': [],
         'short_strike': [],
         'max_profit': [],
@@ -160,7 +135,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes):
         # the long leg
         all_sell_strikes = get_sell_strikes(buy_strike)
 
-        if all_sell_strikes.size == 0:
+        if all_sell_strikes.size == 0 and verbose:
             print('{:>2}: count({}) = 0'.format(id, int(buy_strike)))
             continue
 
@@ -178,7 +153,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes):
         open_credits.dropna(axis=0, how='all', inplace=True)
         viable_opens = open_credits.index
 
-        if len(viable_opens) == 0:
+        if len(viable_opens) == 0 and verbose:
             print('{:>2}: count({}) = 0'.format(id, int(buy_strike)))
             continue
 
@@ -234,7 +209,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes):
 
             # Finally, add all of the data to the dict
             trades_data['open_time'] += [open_time] * total_trades_for_open
-            trades_data['open_credits'] += open_time_credits[
+            trades_data['open_credit'] += open_time_credits[
                 max_profits.index].tolist()
             trades_data['short_strike'] += max_profits.index.tolist()
             trades_data['max_profit'] += max_profits.tolist()
@@ -253,13 +228,17 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes):
         if total_trades > 0:
             trades_data['long_strike'] += [buy_strike] * total_trades
 
-        print('{:>2}: count({}) = {}'.format(id, int(buy_strike), total_trades))
+        if verbose:
+            print('{:>2}: count({}) = {}'.format(
+                id, int(buy_strike), total_trades))
 
     profits.put(pd.DataFrame(trades_data).set_index('open_time'))
-    print('{:>2}: done'.format(id))
 
-def collect_spreads(ticker, bull_bear, put_call, working_dir='pickles',
-                    vertical=True, num_procs = 10):
+    if verbose:
+        print('{:>2}: done'.format(id))
+
+def collect_spreads(data_path, bull_bear, put_call, vertical=True,
+                    num_procs = 10, verbose=False):
     # Error checking
     try:
         # Allow for bull, bear, BulL, BEAR, etc
@@ -288,11 +267,7 @@ def collect_spreads(ticker, bull_bear, put_call, working_dir='pickles',
                           '(case-insensitive)'))
 
     # Get all the necessary information to do some processing.
-    single_legs = collect_single_legs(ticker, working_dir)
-
-    # TODO: use to whittle things down to only those calls that are at or above
-    # the money, as per the description
-    # stock_prices = get_stock_prices(ticker, working_dir)
+    single_legs = collect_single_legs(data_path)[PC_char]
 
     # Ok, we got all of the data and metadata, so we're good to go. Let's build
     # the lambda we will use to get the sell strike from the buy strike and the
@@ -307,61 +282,52 @@ def collect_spreads(ticker, bull_bear, put_call, working_dir='pickles',
         def get_sell_strikes_gen(strikes):
             return lambda buy_strike: strikes[strikes < buy_strike]
 
-    result_concat = []
-
     # Build the thread-specific objects.
 
     # First we need a Queue of the strikes to be used for the buying leg.
     buy_strikes = multiprocessing.Queue()
 
     # And the threads will put their resulting DataFrames into this queue
-    exp_profits = multiprocessing.Queue()
+    profits = multiprocessing.Queue()
 
-    for exp_date, exp_dict in single_legs.items():
-        # Focus exclusively on puts since this is a put spread
-        exp_info = exp_dict[PC_char]
+    bid_df = single_legs['bid']
+    ask_df = single_legs['ask']
 
-        bid_df = exp_info['bid']
-        ask_df = exp_info['ask']
+    # Pull out the relevant info
+    all_strikes = single_legs['strikes']
 
-        # Pull out the relevant info
-        all_strikes = exp_info['strikes']
+    # Load in the buy-leg strikes so that the threads can pull them out
+    for s in all_strikes:
+        buy_strikes.put(s)
 
-        # Load in the buy-leg strikes so that the threads can pull them out
-        for s in all_strikes:
-            buy_strikes.put(s)
+    concat_list = []
+    if num_procs > 1:
+        processes = []
+        for i in range(num_procs):
+            p = multiprocessing.Process(
+                target=spread_worker,
+                args=(i, bid_df, ask_df, buy_strikes, profits,
+                    get_sell_strikes_gen(all_strikes),)
+            )
+            p.start()
+            processes.append(p)
 
-        concat_list = []
-        if num_procs > 1:
-            processes = []
-            for i in range(num_procs):
-                p = multiprocessing.Process(
-                    target=spread_worker,
-                    args=(i, bid_df, ask_df, buy_strikes, exp_profits,
-                        get_sell_strikes_gen(all_strikes),)
-                )
-                p.start()
-                processes.append(p)
+        # This is going to be a lot of buffered data in the Queue. The
+        # poster on this topic https://stackoverflow.com/a/26738946
+        # mentioned that we may need to read from the Queue *before* joining
+        # Maybe the better solution is to reference a semaphor
+        for _ in range(num_procs):
+            concat_list.append(profits.get())
 
-            # This is going to be a lot of buffered data in the Queue. The
-            # poster on this topic https://stackoverflow.com/a/26738946
-            # mentioned that we may need to read from the Queue *before* joining
-            # Maybe the better solution is to reference a semaphor
-            for _ in range(num_procs):
-                concat_list.append(exp_profits.get())
+        for p in processes:
+            p.join()
+    else:
+        spread_worker(0, bid_df, ask_df, buy_strikes, profits,
+                      get_sell_strikes_gen(all_strikes), verbose)
 
-            for p in processes:
-                p.join()
-        else:
-            spread_worker(0, bid_df, ask_df, buy_strikes, exp_profits,
-                          get_sell_strikes_gen(all_strikes),)
+    result_df = pd.concat(concat_list)
 
-        exp_df = pd.concat(concat_list)
-        exp_df['expiry'] = [exp_date] * len(exp_df)
-
-        result_concat.append(exp_df)
-
-    return pd.concat(result_concat)
+    return result_df
 
 def bull_bear_phase_spread(ticker):
     '''
