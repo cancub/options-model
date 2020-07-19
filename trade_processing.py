@@ -327,6 +327,11 @@ def collect_spreads(data_path, bull_bear, put_call, vertical=True,
 
     result_df = pd.concat(concat_list)
 
+    # Show the true values of the trade
+    result_df['open_credit'] *= 100
+    result_df['max_profit'] *= 100
+    result_df['max_profit'] -= FEE
+
     return result_df
 
 def bull_bear_phase_spread(ticker):
