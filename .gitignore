@@ -3,6 +3,7 @@ backups/
 papers/
 testing/
 trades/
+processing/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
