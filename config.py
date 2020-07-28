@@ -1,4 +1,5 @@
 STORAGE_DIR     = 'pickles'
+BACKUPS_DIR     = 'backups'
 META_COLUMNS    = ['symbolId', 'type', 'strike']
 # DATA_NAMES      = ['lastTradePrice', 'volume', 'volatility', 'delta', 'gamma',
 #                    'theta', 'vega', 'rho', 'openInterest']
