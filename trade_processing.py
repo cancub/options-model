@@ -8,6 +8,8 @@ import queue
 import re
 import sys
 
+import utils
+
 # Entry and exit fees: 9.95 + 1/contract
 #   ex: 1 contract : 9.95 + 1 = 10.95
 #       2 contract : 9.95 + 2 = 11.95
@@ -34,65 +36,11 @@ def collect_TA(ticker, dates):
 # TODO:
 # check how to find vega
 
-def _get_basic_datetimes(times_strings):
-    dt_match = re.compile(r'\d+-\d+-\d+ \d+:\d+')
-    strptime_format = '%Y-%m-%d %H:%M'
-    return np.array(list(map(
-        lambda x: dt.datetime.strptime(
-            re.match(dt_match, x).group(0), strptime_format),
-        times_strings
-    )))
-
 def get_stock_prices(ticker, working_dir='pickles'):
     # Get the prices time series for the underlying security of this ticker
     all_stock_prices = pd.read_pickle(os.path.join(working_dir, 'price'))
-    stock_dtimes = _get_basic_datetimes(all_stock_prices['datetime'])
+    stock_dtimes = utils.get_basic_datetimes(all_stock_prices['datetime'])
     return all_stock_prices['ticker'].set_index(stock_dtimes, inplace=True)
-
-def _process_options(data, metadata, dtimes):
-    result = {}
-    for otype in ['C', 'P']:
-        # Filter metadata for this option type
-        type_meta = metadata[metadata['type'] == otype]
-
-        # Get the data (bid, ask) for these strikes
-        bid_df = pd.DataFrame(
-            data[0,:,list(type_meta.index)].T,
-            index = dtimes,
-            columns=type_meta['strike']
-        )
-        ask_df = pd.DataFrame(
-            data[1,:,list(type_meta.index)].T,
-            index = dtimes,
-            columns=type_meta['strike']
-        )
-
-        # Get the DataFrames for all combinations of bid/ask + open/all
-        result[otype] = {
-            'strikes': type_meta['strike'], 'bid': bid_df, 'ask': ask_df}
-
-    return result
-
-# ================================= Single-Leg =================================
-
-def collect_single_legs(data_path):
-    # Collect all of the relevant info for this ticker and expiry
-    data = np.load(data_path, allow_pickle=True)
-    # In older versions of the metadata, indices do not correspond to the
-    # option indices in the numpy array. Resetting them here fixes that and
-    # does not affect newer metadata
-    metadata = pd.read_pickle(data_path + '_meta').reset_index(drop=True)
-    with open(data_path + '_times', 'r') as TF:
-        dtimes = _get_basic_datetimes(TF.read().split('\n')[:-1])
-
-    # Make sure all the quantities jive
-    assert(data.shape[0] == 10)
-    assert(data.shape[1] == len(dtimes))
-    assert(data.shape[2] == len(metadata))
-
-    # Alright, we now have all the information we need to do some
-    # pre-processing with respect to viability
-    return _process_options(data, metadata, dtimes)
 
 # ============================== Vertical spreads ==============================
 
@@ -248,8 +196,10 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
     if verbose:
         print('{:>2}: done'.format(id))
 
-def collect_spreads(data_path, directions=['bull', 'bear'], options=['c','p'],
-                    vertical=True, num_procs = 10, verbose=False):
+
+def collect_spreads(
+        ticker, expiry, working_dir, directions=['bull', 'bear'],
+        options=['c','p'], vertical=True, num_procs = 10, verbose=False):
     # Error checking
     if not isinstance(directions, list):
         raise TypeError(
@@ -306,15 +256,14 @@ def collect_spreads(data_path, directions=['bull', 'bear'], options=['c','p'],
     # And the threads will put their resulting DataFrames into this queue
     profits = multiprocessing.Queue()
 
-    # Get all the necessary information to do some processing.
-    single_legs = collect_single_legs(data_path)
-
     result_df_list = []
+
+    base_path = os.path.join(working_dir, expiry, ticker)
 
     for o in options:
 
-        # There's no good way to word this
-        spread_legs = single_legs[o]
+        bid_df = pd.read_pickle('{}_{}bid'.format(base_path, o))
+        ask_df = pd.read_pickle('{}_{}bid'.format(base_path, o))
 
         for d in directions:
 
@@ -338,11 +287,8 @@ def collect_spreads(data_path, directions=['bull', 'bear'], options=['c','p'],
                 def get_sell_strikes_gen(strikes):
                     return lambda buy_strike: strikes[strikes < buy_strike]
 
-            bid_df = spread_legs['bid']
-            ask_df = spread_legs['ask']
-
             # Pull out the relevant info
-            all_strikes = spread_legs['strikes']
+            all_strikes = bid_df.columns
 
             # Load in the buy-leg strikes so that the threads can pull them out
             for s in all_strikes:
