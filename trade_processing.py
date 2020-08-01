@@ -245,7 +245,7 @@ def collect_spreads(
     for o in options:
 
         bid_df = pd.read_pickle('{}_{}bid'.format(base_path, o))
-        ask_df = pd.read_pickle('{}_{}bid'.format(base_path, o))
+        ask_df = pd.read_pickle('{}_{}ask'.format(base_path, o))
 
         for d in directions:
 
