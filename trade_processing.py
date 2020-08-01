@@ -45,8 +45,8 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
         'open_time': [],
         'open_margin': [],
         'open_credit': [],
-        'long_strike': [],
-        'short_strike': [],
+        'leg1_strike': [],
+        'leg2_strike': [],
         'max_profit': [],
         'close_time': [],
     }
@@ -152,7 +152,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
             trades_data['open_time'] += [open_time] * total_trades_for_open
             trades_data['open_margin'] += open_time_margin.tolist()
             trades_data['open_credit'] += open_time_credits.tolist()
-            trades_data['short_strike'] += max_profits_strikes.tolist()
+            trades_data['leg2_strike'] += max_profits_strikes.tolist()
             trades_data['max_profit'] += max_profits.tolist()
             trades_data['close_time'] += max_profit_closes.tolist()
 
@@ -160,14 +160,14 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
             new_length = len(trades_data['open_time'])
             for k, v in trades_data.items():
                 # We haven't added the long strikes yet
-                if k != 'long_strike' and new_length != len(v):
+                if k != 'leg1_strike' and new_length != len(v):
                     import pdb; pdb.set_trace()
 
         # We've finished up all the possible trades with this buy leg. If there
         # were any valid trades, the buy-strike dataframe, add the strike price
         # column and return it to the main thread.
         if total_trades > 0:
-            trades_data['long_strike'] += [buy_strike] * total_trades
+            trades_data['leg1_strike'] += [-buy_strike] * total_trades
 
         if verbose:
             print('{:>2}: count({}) = {}'.format(
@@ -312,7 +312,7 @@ def collect_spreads(
     result_df = pd.concat(result_df_list)
 
     # Show the true values of the trade
-    for k in ('open_margin','leg1_open_credit','leg2_open_credit','max_profit'):
+    for k in ('open_margin', 'open_credit', 'max_profit'):
         result_df[k] *= 100
 
     return result_df
