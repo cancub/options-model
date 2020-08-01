@@ -1,12 +1,8 @@
-from collections import OrderedDict
-import datetime as dt
 import multiprocessing
 import numpy as np
 import os
 import pandas as pd
 import queue
-import re
-import sys
 
 import utils
 
@@ -16,18 +12,9 @@ import utils
 # So for both entre and exit of one contracts
 FEE =  9.95 + 1
 
-# The required profit that we want
-MIN_PROFIT = 100
-
-# The amount of money we're willing to spend to enter the trade
-MAX_DEBIT = 500
-
 # Used for questrade calculations
 # NOTE: this is /100 because of the scale of options pricing
 MARGIN = 60
-
-# The negative to positive ratio
-NP_RATIO = 3
 
 def collect_TA(ticker, dates):
     # return the technical analysis portion for the ticker to be used in the
