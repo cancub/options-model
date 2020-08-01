@@ -7,6 +7,8 @@ import pandas as pd
 import sys
 import trade_processing as tp
 
+import utils
+
 TRADES_DIR = 'trades'
 SOURCE_DIR = 'processing/single_legs'
 # PICKLES_DIR = 'testing/pickles'
@@ -35,7 +37,7 @@ parser.add_argument(
     '-s', '--stats', action='store_true',
     help='Display the plots for credits received at open and maximum profit')
 parser.add_argument(
-    '-w', '--winners', action='store_true',
+    '-w', '--winners', type=float,
     help='Print the number of trades where more than $100 was made')
 parser.add_argument(
     '-l', '--plots', action='store_true',
@@ -96,8 +98,9 @@ for exp in expiries:
         print('Zero trades that match this criteria')
         sys.exit(0)
 
-    if args.winners:
-        total_winners = len(df[df['max_profit'] > 100])
+    if args.winners is not None:
+        total_winners = len(
+            df[df['max_profit'] > (args.winners + utils.calculate_fee(1,True))])
         print(
             '{} winning trades out of {} made ({:.2%}%)'.format(
                 total_winners, total_trades, total_winners/total_trades))

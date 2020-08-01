@@ -6,12 +6,6 @@ import queue
 
 import utils
 
-# Entry and exit fees: 9.95 + 1/contract
-#   ex: 1 contract : 9.95 + 1 = 10.95
-#       2 contract : 9.95 + 2 = 11.95
-# So for both entre and exit of one contracts
-FEE =  9.95 + 1
-
 # Used for questrade calculations
 # NOTE: this is /100 because of the scale of options pricing
 MARGIN = 60
@@ -318,11 +312,8 @@ def collect_spreads(
     result_df = pd.concat(result_df_list)
 
     # Show the true values of the trade
-    result_df['open_margin'] *= 100
-    result_df['open_credit'] *= 100
-    result_df['open_credit'] -= FEE
-    result_df['max_profit'] *= 100
-    result_df['max_profit'] -= FEE
+    for k in ('open_margin','leg1_open_credit','leg2_open_credit','max_profit'):
+        result_df[k] *= 100
 
     return result_df
 
