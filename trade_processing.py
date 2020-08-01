@@ -23,7 +23,8 @@ MIN_PROFIT = 100
 MAX_DEBIT = 500
 
 # Used for questrade calculations
-MARGIN = 6000
+# NOTE: this is /100 because of the scale of options pricing
+MARGIN = 60
 
 # The negative to positive ratio
 NP_RATIO = 3
@@ -99,7 +100,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
         #   3 gagillion + NaN = NaN
         # as "OK"
         open_margin = short_bids.fillna(0).add(long_bids.fillna(0), axis='rows')
-        open_credits[open_margin * 100 > MARGIN] = np.nan
+        open_credits[open_margin > MARGIN] = np.nan
 
         # Get rid of all timepoints that have no viable opens for any
         # combination
@@ -159,7 +160,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
             open_time_margin = open_margin.loc[open_time, max_profits_strikes]
 
             # Double check that we didn't mess this up earlier
-            if open_time_margin.max()*100 > MARGIN:
+            if open_time_margin.max() > MARGIN:
                 raise Exception('Error with maximum open credit')
 
             total_trades_for_open = len(max_profits)
