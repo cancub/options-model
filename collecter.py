@@ -2,77 +2,72 @@
 # coding: utf-8
 from copy import deepcopy
 import datetime
+import itertools
+import multiprocessing
 import os
-import sys
-import threading
-import time
-import random
+import pandas as pd
 
 import config
-from data_management import update_data_files, update_price_df
 from questrade_options_api import QuestradeTickerOptions
 
-TICKERS    = [x.upper() for x in list(set(sys.argv[1:]))]
-NOW_DT     = datetime.datetime.now()
-
-# The lock related to accessing or modifying the filesystem
-FS_LOCK    = threading.Lock()
-
-# The lock related to adding a price to the price dictionary for this datetime
-PRICE_LOCK = threading.Lock()
-prices = {'datetime': [NOW_DT]}
+# The seconds and microseconds are just clutter
+NOW_DT = datetime.datetime.now().replace(second=0, microsecond=0)
 
 # The function to use in threading
 def options_gofer(q_obj, ticker):
-    def log(msg):
-        if not config.QUIET:
-            print('{:>5}: {}'.format(ticker, msg))
-
-    log('starting')
-
     # Retrieve and store all the available metadata for the company
     # TODO: save this value to file to avoid one RTT
     q_obj.load_company(ticker)
 
-    if config.MULTITHREADED:
-        PRICE_LOCK.acquire()
+    # Retrieve and the data related to the options of an underlying security
+    ticker_options = q_obj.get_options()
 
-    # Save the most recent price of the underlying security
-    prices[ticker] = [q_obj.get_security_price()]
+    # Set up for building the DataFrame
+    expiry_type_strikes = []
+    index_names = ['datetime', 'expiry', 'type', 'strike']
+    data = {n: [] for n in config.DATA_NAMES}
 
-    if config.MULTITHREADED:
-        PRICE_LOCK.release()
+    for expiry, series in ticker_options.items():
+        for sId, info in series.items():
+            expiry_type_strikes.append((expiry, info['type'], info['strike']))
+            for n in config.DATA_NAMES:
+                data[n].append(info['data'][n])
 
-    log('retreiving options for each available expiry')
+    indices = ([a, b[0], b[1], b[2]] for a, b
+                    in itertools.product((NOW_DT,), expiry_type_strikes))
 
-    options = q_obj.get_options()
+    to_add_df = pd.DataFrame(
+        data, index = pd.MultiIndex.from_tuples(indices, names=index_names))
 
-    log('processing options into dataframes')
+    # Load up the existing DataFrame for this ticker and append this new data
+    # to it
+    ticker_path = os.path.join(config.STORAGE_DIR, ticker)
+    try:
+        ticker_df = pd.concat((pd.read_pickle(ticker_path), to_add_df))
+    except FileNotFoundError:
+        # This ticker doesn't exist yet, so this is all the data we have
+        ticker_df = to_add_df
 
-    # Process the expiries and their respective series
-    for ex, series_data in options.items():
-        log('processing {}'.format(ex))
-        update_data_files(ticker, ex, series_data, NOW_DT, FS_LOCK)
-
-    log('complete')
+    # Save the new ticker DataFrame to file
+    ticker_df.to_pickle(ticker_path)
 
 # Get the API object. No arguments implies we want to automatically reload and
 # refresh the token.
 q = QuestradeTickerOptions()
 
-threads = []
+processes = []
 
-for ticker in TICKERS:
+for ticker in config.TICKERS:
     if config.MULTITHREADED:
-        t = threading.Thread(target=options_gofer, args=(deepcopy(q), ticker,))
-        t.start()
-        threads.append(t)
+        p = multiprocessing.Process(
+            target=options_gofer,
+            args=(deepcopy(q), ticker,)
+        )
+        p.start()
+        processes.append(p)
     else:
-        options_gofer(q,ticker)
+        options_gofer(q, ticker)
 
 if config.MULTITHREADED:
-    for t in threads:
-        t.join()
-
-# Update the price dataframe now that all the threads are done
-update_price_df(prices)
+    for p in processes:
+        p.join()
