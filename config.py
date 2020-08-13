@@ -13,6 +13,10 @@ TICKERS         = ['FB', 'LYB', 'SPY', 'TSLA', 'QQQ', 'AAPL', 'EEM', 'IWM',
 MULTITHREADED   = True
 QUIET           = True
 
+# Maximum amount of margin we are allowed to use for trades
+# NOTE: this is /100 because of the scale of options pricing
+MARGIN          = 60
+
 '''
 NOTE:
 when reading the numpy files:

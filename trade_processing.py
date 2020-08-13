@@ -4,11 +4,8 @@ import os
 import pandas as pd
 import queue
 
+import config
 import utils
-
-# Used for questrade calculations
-# NOTE: this is /100 because of the scale of options pricing
-MARGIN = 60
 
 def collect_TA(ticker, dates):
     # return the technical analysis portion for the ticker to be used in the
@@ -81,7 +78,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
         #   3 gagillion + NaN = NaN
         # as "OK"
         open_margin = short_bids.fillna(0).add(long_bids.fillna(0), axis='rows')
-        open_credits[open_margin > MARGIN] = np.nan
+        open_credits[open_margin > config.MARGIN] = np.nan
 
         # Get rid of all timepoints that have no viable opens for any
         # combination
@@ -141,7 +138,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
             open_time_margin = open_margin.loc[open_time, max_profits_strikes]
 
             # Double check that we didn't mess this up earlier
-            if open_time_margin.max() > MARGIN:
+            if open_time_margin.max() > config.MARGIN:
                 raise Exception('Error with maximum open credit')
 
             total_trades_for_open = len(max_profits)
