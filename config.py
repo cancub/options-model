@@ -9,7 +9,7 @@ TICKERS         = ['FB', 'LYB', 'SPY', 'TSLA', 'QQQ', 'AAPL', 'EEM', 'IWM',
                    'NFLX', 'AMD', 'NVDA', 'GLD', 'SLV', 'VXX', 'GE', 'BAC',
                    'BA', 'AAL', 'NAT', 'CCL', 'F', 'DIS', 'BABA', 'PFE' ,'SBUX',
                    'M', 'ZM', 'SNAP', 'AMZN', 'C', 'ROKU', 'BBBY', 'UBER',
-                   'SDC', 'INTC', 'SPCE', 'TWTR', 'TLRY']
+                   'SDC', 'INTC', 'SPCE', 'TWTR', 'TLRY', 'MSFT']
 MULTITHREADED   = True
 QUIET           = True
 
