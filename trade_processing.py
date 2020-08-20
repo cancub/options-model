@@ -54,7 +54,6 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
             buy_strike = buy_strikes.get(timeout=1)
         except queue.Empty:
             break
-        # print('{:>2}: checking {}'.format(id, int(buy_strike)))
 
         total_trades = 0
         long_bids = bid_df[buy_strike]

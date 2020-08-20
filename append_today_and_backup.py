@@ -40,8 +40,6 @@ with TemporaryDirectory() as tmpdirname:
         # (Over)write the compressed pickle with the new concatenated data
         df.to_pickle(compressed_path)
 
-    import pdb; pdb.set_trace()
-
     # Get the name for the new tarball of pickles
     filepath = os.path.join(
         BACKUPS_DIR, '{}.tar'.format(datetime.now().date()))
