@@ -1,6 +1,7 @@
 from   datetime import datetime
 from   glob import glob
 import pandas as pd
+import shutil
 from   subprocess import check_call, check_output
 from   tempfile import TemporaryDirectory
 import os
@@ -49,3 +50,8 @@ with TemporaryDirectory() as tmpdirname:
         ['tar', '-C', tmpdirname, '-cf', filepath] +
             [os.path.basename(f) for f in glob('{}/*'.format(tmpdirname))]
     )
+
+# If we make it this far, everything should have been stored in a backup, so we
+# can get rid of the pickles
+shutil.rmtree(STORAGE_DIR)
+os.mkdir(STORAGE_DIR)
