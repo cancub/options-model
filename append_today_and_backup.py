@@ -5,10 +5,11 @@ from   subprocess import check_call, check_output
 from   tempfile import TemporaryDirectory
 import os
 
-from config import STORAGE_DIR, BACKUPS_DIR
+from   config import STORAGE_DIR, BACKUPS_DIR
+import utils
 
 # Find the last backup tarball
-last_backup = sorted(os.listdir(BACKUPS_DIR))[-1]
+last_backup = utils.get_last_backup_path()
 
 # Get the list of tickers that were generated today
 todays_tickers = os.listdir(STORAGE_DIR)
@@ -17,9 +18,7 @@ todays_tickers = os.listdir(STORAGE_DIR)
 # existing DataFrames for each ticker
 with TemporaryDirectory() as tmpdirname:
     print('unpacking ' + last_backup)
-    check_call(
-        ['tar', '-C', tmpdirname, '-xf', os.path.join(BACKUPS_DIR, last_backup)]
-    )
+    check_call(['tar', '-C', tmpdirname, '-xf', last_backup])
 
     # Go through each of the tickers that were parsed today
     for tik in os.listdir(STORAGE_DIR):
