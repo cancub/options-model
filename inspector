@@ -24,7 +24,6 @@ parser.add_argument(
 parser.add_argument(
     '-p', '--min-profit', type=float,
     help='The minimum profit for the data to display')
-parser.add_argument('-m', '--multiproc-threads', type=int, default=10)
 parser.add_argument(
     '-t', '--dte', nargs=2, type=int, metavar=('MIN', 'MAX'),
     help=('The minimum and maximum number of days until the expiry for the '
