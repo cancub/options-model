@@ -52,19 +52,7 @@ args = parser.parse_args()
 
 ticker = args.ticker.upper()
 
-df_path = os.path.join(
-    config.TRADES_DIR, '{}_{}_spreads'.format(ticker, args.expiry.date()))
-
-if not os.path.exists(df_path):
-    df = tp.collect_spreads(
-        ticker=ticker,
-        expiry=str(args.expiry.date()),
-        num_procs=args.multiproc_threads,
-        verbose=args.verbose,
-    )
-    df.to_pickle(df_path)
-else:
-    df = pd.read_pickle(df_path)
+df = utils.load_spreads(ticker, str(args.expiry.date()))
 
 if args.max_margin is not None:
     df = df[df['open_margin'] < args.max_margin]

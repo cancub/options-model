@@ -7,6 +7,7 @@ import re
 import subprocess as sp
 
 import config
+import trade_processing as tp
 
 BASE_FEE = 9.95
 
@@ -40,6 +41,21 @@ def retrieve_options(ticker, expiry=None):
     # Select the expiry if specified
     if expiry is not None:
         df = df.xs(expiry, level=1)
+
+    return df
+
+def load_spreads(ticker, expiry):
+    df_path = os.path.join(
+        config.TRADES_DIR, '{}_{}_spreads'.format(ticker, expiry))
+
+    # First see if we've already built these spreads
+    try:
+        df = pd.read_pickle(df_path)
+    except FileNotFoundError:
+        # Nope, so load them
+        df = tp.collect_spreads(ticker=ticker, expiry=expiry)
+        # And then save them for next time
+        df.to_pickle(df_path)
 
     return df
 
