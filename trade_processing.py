@@ -176,7 +176,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
 
 
 def collect_spreads(
-        ticker, expiry, working_dir, directions=['bull', 'bear'],
+        ticker, expiry, directions=['bull', 'bear'],
         options=['c','p'], vertical=True, num_procs = 10, verbose=False):
     # Error checking
     if not isinstance(directions, list):
@@ -234,14 +234,15 @@ def collect_spreads(
     # And the threads will put their resulting DataFrames into this queue
     profits = multiprocessing.Queue()
 
-    result_df_list = []
+    tik_exp_df = utils.retrieve_options(ticker, expiry)
 
-    base_path = os.path.join(working_dir, expiry, ticker)
+    result_df_list = []
 
     for o in options:
 
-        bid_df = pd.read_pickle('{}_{}bid'.format(base_path, o))
-        ask_df = pd.read_pickle('{}_{}ask'.format(base_path, o))
+        # TODO: convert the strike into the column numbers?
+        bid_df = tik_exp_df.xs(o, level=1)['bidPrice'].unstack(level=[1])
+        ask_df = tik_exp_df.xs(o, level=1)['askPrice'].unstack(level=[1])
 
         for d in directions:
 
