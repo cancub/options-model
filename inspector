@@ -53,65 +53,57 @@ parser.add_argument('ticker', metavar='TICKER')
 
 args = parser.parse_args()
 
-if args.expiry is None:
-    expiries = [string_to_datetime(s) for s in os.listdir(SOURCE_DIR)]
-else:
-    expiries = [args.expiry]
-
 ticker = args.ticker.upper()
 
-for exp in expiries:
-    print(exp)
-    df_path = os.path.join(
-        TRADES_DIR, '{}_{}_spreads'.format(ticker, exp.date()))
+df_path = os.path.join(
+    TRADES_DIR, '{}_{}_spreads'.format(ticker, args.expiry.date()))
 
-    if not os.path.exists(df_path):
-        df = tp.collect_spreads(
-            ticker=ticker,
-            expiry=str(exp.date()),
-            working_dir=SOURCE_DIR,
-            num_procs=args.multiproc_threads,
-            verbose=args.verbose,
-        )
-        df.to_pickle(df_path)
-    else:
-        df = pd.read_pickle(df_path)
+if not os.path.exists(df_path):
+    df = tp.collect_spreads(
+        ticker=ticker,
+        expiry=str(args.expiry.date()),
+        num_procs=args.multiproc_threads,
+        verbose=args.verbose,
+    )
+    df.to_pickle(df_path)
+else:
+    df = pd.read_pickle(df_path)
 
-    if args.max_margin is not None:
-        df = df[df['open_margin'] < args.max_margin]
-    if args.option is not None:
-        df = df[df['option'] == args.option.upper()[0]]
-    if args.direction is not None:
-        df = df[df['direction'] == args.direction]
+if args.max_margin is not None:
+    df = df[df['open_margin'] < args.max_margin]
+if args.option is not None:
+    df = df[df['option'] == args.option.upper()[0]]
+if args.direction is not None:
+    df = df[df['direction'] == args.direction]
 
-    if args.dte is not None:
-        # Check minimum
-        if args.dte[0] != -1:
-            df = df[:str(exp - timedelta(days=args.dte[0]))]
-        # Check maximum
-        if args.dte[1] != -1:
-            df = df[str(exp - timedelta(days=args.dte[0])):]
+if args.dte is not None:
+    # Check minimum
+    if args.dte[0] != -1:
+        df = df[:str(args.expiry - timedelta(days=args.dte[0]))]
+    # Check maximum
+    if args.dte[1] != -1:
+        df = df[str(args.expiry - timedelta(days=args.dte[0])):]
 
-    total_trades = len(df)
+total_trades = len(df)
 
-    if total_trades == 0:
-        print('Zero trades that match this criteria')
-        sys.exit(0)
+if total_trades == 0:
+    print('Zero trades that match this criteria')
+    sys.exit(0)
 
-    if args.winners is not None:
-        total_winners = len(
-            df[df['max_profit'] > (args.winners + utils.calculate_fee(1,True))])
-        print(
-            '{} winning trades out of {} made ({:.2%}%)'.format(
-                total_winners, total_trades, total_winners/total_trades))
+if args.winners is not None:
+    total_winners = len(
+        df[df['max_profit'] > (args.winners + utils.calculate_fee(1,True))])
+    print(
+        '{} winning trades out of {} made ({:.2%})'.format(
+            total_winners, total_trades, total_winners/total_trades))
 
-    if args.stats:
-        print(df['max_profit'].describe())
+if args.stats:
+    print(df['max_profit'].describe())
 
-    if args.plots:
-        df.hist(
-            column=['open_credit', 'open_margin', 'max_profit'],
-            sharey=True,
-            bins=args.bins,
-        )
-        plt.show()
+if args.plots:
+    df.hist(
+        column=['open_credit', 'open_margin', 'max_profit'],
+        sharey=True,
+        bins=args.bins,
+    )
+    plt.show()
