@@ -58,16 +58,12 @@ q = QuestradeTickerOptions()
 processes = []
 
 for ticker in config.TICKERS:
-    if config.MULTITHREADED:
-        p = multiprocessing.Process(
-            target=options_gofer,
-            args=(deepcopy(q), ticker,)
-        )
-        p.start()
-        processes.append(p)
-    else:
-        options_gofer(q, ticker)
+    p = multiprocessing.Process(
+        target=options_gofer,
+        args=(deepcopy(q), ticker,)
+    )
+    p.start()
+    processes.append(p)
 
-if config.MULTITHREADED:
-    for p in processes:
-        p.join()
+for p in processes:
+    p.join()

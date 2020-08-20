@@ -8,10 +8,7 @@ import sys
 import trade_processing as tp
 
 import utils
-
-TRADES_DIR = 'trades'
-SOURCE_DIR = 'processing/single_legs'
-# PICKLES_DIR = 'testing/pickles'
+import config
 
 def string_to_datetime(string):
     return datetime.strptime(string, '%Y-%m-%d')
@@ -56,7 +53,7 @@ args = parser.parse_args()
 ticker = args.ticker.upper()
 
 df_path = os.path.join(
-    TRADES_DIR, '{}_{}_spreads'.format(ticker, args.expiry.date()))
+    config.TRADES_DIR, '{}_{}_spreads'.format(ticker, args.expiry.date()))
 
 if not os.path.exists(df_path):
     df = tp.collect_spreads(
