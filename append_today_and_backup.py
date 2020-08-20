@@ -21,7 +21,7 @@ with TemporaryDirectory() as tmpdirname:
     check_call(['tar', '-C', tmpdirname, '-xf', last_backup])
 
     # Go through each of the tickers that were parsed today
-    for tik in os.listdir(STORAGE_DIR):
+    for tik in sorted(os.listdir(STORAGE_DIR)):
         compressed_path = os.path.join(tmpdirname, tik + '.bz2')
 
         print('Loading today\'s data for {}'.format(tik))
