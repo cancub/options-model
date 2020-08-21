@@ -177,7 +177,7 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
 
 def collect_spreads(
         ticker, expiry, directions=['bull', 'bear'],
-        options=['c','p'], vertical=True, num_procs = 10, verbose=False):
+        options=['c','p'], vertical=True, num_procs=10, verbose=False):
     # Error checking
     if not isinstance(directions, list):
         raise TypeError(
@@ -302,7 +302,7 @@ def collect_spreads(
                 spread_df = profits.get()
 
             spread_df['direction'] = d
-            spread_df['option'] = o
+            spread_df['type'] = o
 
             result_df_list.append(spread_df)
 

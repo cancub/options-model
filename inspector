@@ -56,7 +56,7 @@ df = utils.load_spreads(ticker, str(args.expiry.date()))
 if args.max_margin is not None:
     df = df[df['open_margin'] < args.max_margin]
 if args.option is not None:
-    df = df[df['option'] == args.option.upper()[0]]
+    df = df[df['type'] == args.option.upper()[0]]
 if args.direction is not None:
     df = df[df['direction'] == args.direction]
 
