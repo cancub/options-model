@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import multiprocessing
 import numpy as np
 import os
@@ -26,6 +27,7 @@ def get_stock_prices(ticker, working_dir='pickles'):
 # TODO: look at _all_ trades, irresective of direction
 def spread_worker(
     id,
+    option_type_df,
     bid_df,
     ask_df,
     all_strikes,
@@ -46,15 +48,8 @@ def spread_worker(
     rely on get_sell_strikes() to return the list of strikes to be used for the leg we
     will _sell_.
     '''
-    trades_data = {
-        'open_time': [],
-        'open_margin': [],
-        'open_credit': [],
-        'leg1_strike': [],
-        'leg2_strike': [],
-        'max_profit': [],
-        'close_time': [],
-    }
+
+    result_dataframes = []
 
     while True:
         # Grab a strike for the leg we will be longing
@@ -102,8 +97,7 @@ def spread_worker(
         # short legs
         short_asks = -ask_df[viable_strikes]
 
-        # These are the lists that will be used to add new close-side
-        # columns for the open_credits DataFrame
+        leg1_dfs = []
 
         # Ok, now for each viable open time, figure out the maximum
         # profit if we were to close at the same time
@@ -144,38 +138,65 @@ def spread_worker(
 
             total_trades_for_open = len(max_profits)
 
+            if total_trades_for_open == 0:
+                continue
+
             total_trades += total_trades_for_open
 
-            # Finally, add all of the data to the dict
-            trades_data['open_time'] += [open_time] * total_trades_for_open
-            trades_data['open_margin'] += open_time_margin.tolist()
-            trades_data['open_credit'] += open_time_credits.tolist()
-            trades_data['leg2_strike'] += max_profits_strikes.tolist()
-            trades_data['max_profit'] += max_profits.tolist()
-            trades_data['close_time'] += max_profit_closes.tolist()
-
-            # Check that the lengths still match
-            new_length = len(trades_data['open_time'])
-            for k, v in trades_data.items():
-                # We haven't added the long strikes yet
-                if k != 'leg1_strike' and new_length != len(v):
-                    import pdb; pdb.set_trace()
-
-        # We've finished up all the possible trades with this buy leg. If there
-        # were any valid trades, the buy-strike dataframe, add the strike price
-        # column and return it to the main thread.
-        if total_trades > 0:
-            trades_data['leg1_strike'] += [-buy_strike] * total_trades
+            # Finally, use the data to build the DataFrame
+            leg1_dfs.append(
+                pd.DataFrame({
+                    'open_time'   : np.full(total_trades_for_open, open_time),
+                    'open_margin' : open_time_margin,
+                    'max_profit'  : max_profits,
+                    'leg2_strike'   : max_profits_strikes,
+                })
+            )
 
         if verbose:
             print('{:>2}: count({}) = {}'.format(
                 id, int(buy_strike), total_trades))
+        if total_trades == 0:
+            continue
 
-    profits_q.put(pd.DataFrame(trades_data).set_index('open_time'))
+        leg1_df = pd.concat(leg1_dfs).reset_index(drop=True)
+        all_open_times = leg1_df.open_time
+        leg2_strikes = leg1_df.leg2_strike
+
+        leg1_strikes = np.full(total_trades, buy_strike)
+        leg1_df.insert(3, 'leg1_strike', leg1_strikes)
+
+        leg1_meta = option_type_df.loc[
+            zip(all_open_times, leg1_strikes)].reset_index(drop=True)
+        leg2_meta = option_type_df.loc[
+            zip(all_open_times, leg2_strikes)].reset_index(drop=True)
+
+        # Drop the bidPrice in the first leg and ask price in the second.
+        leg1_meta.drop(['bidPrice'], axis=1, inplace=True)
+        leg2_meta.drop(['askPrice'], axis=1, inplace=True)
+
+        # Flip the sign of the askPrice for the first leg
+        leg1_meta.askPrice *= -1
+
+        # Change the other name to simply "credit." After inverting the value
+        # for the ask price above, it's obvious whether it's a bid or an ask
+        # price
+        leg1_meta.rename(columns={'askPrice': 'credit'}, inplace=True)
+        leg2_meta.rename(columns={'bidPrice': 'credit'}, inplace=True)
+
+        # We need to rename each of the columns
+        leg1_meta.rename(
+            columns = {k: 'leg1_' + k for k in leg1_meta.keys()}, inplace=True)
+        leg2_meta.rename(
+            columns = {k: 'leg2_' + k for k in leg2_meta.keys()}, inplace=True)
+
+        result_dataframes.append(
+            pd.concat((leg1_df.copy(), leg1_meta, leg2_meta), axis=1))
+
+    profits_q.put(pd.concat(result_dataframes))
 
     if verbose:
         print('{:>2}: done'.format(id))
-
 
 def collect_spreads(
     ticker,
@@ -219,6 +240,7 @@ def collect_spreads(
                     target=spread_worker,
                     args=(
                         i,
+                        option_type_df,
                         bid_df,
                         ask_df,
                         all_strikes,
@@ -244,6 +266,7 @@ def collect_spreads(
         else:
             spread_worker(
                 0,
+                option_type_df,
                 bid_df,
                 ask_df,
                 all_strikes,
@@ -253,14 +276,73 @@ def collect_spreads(
             )
             spread_df = profits_q.get()
 
+        # Add in a column showing which option type was in use for each leg.
+        # Make sure to put this at the head of the trade metadata, since we
+        # don't want to normalize this value, but rather everything to the
+        # right of it
+        if o == 'C':
+            type_array = np.zeros(spread_df.shape[0])
+        else:
+            type_array = np.ones(spread_df.shape[0])
+        for leg in ['leg1', 'leg2']:
+            spread_df.insert(
+                0,
+                leg + '_type',
+                type_array
+            )
+
         result_df_list.append(spread_df)
+
     result_df = pd.concat(result_df_list)
 
+    # Convert open_time to minutes_to_expiry. Make sure to put this right after
+    # the type columns, since this is something that we want to use for the
+    # models, but it's also something we want to normalize
+    expiry_dt = datetime.strptime(expiry, '%Y-%m-%d')
+    expiry_dt += timedelta(hours=16)
+    time_to_expiry = expiry_dt - result_df.open_time
+    result_df.drop('open_time', axis=1, inplace=True)
+    result_df.insert(
+        0,
+        'minutes_to_expiry',
+        time_to_expiry.apply(lambda x: x.total_seconds()) // 60
+    )
+
     # Show the true values of the trade
-    for k in ('open_margin', 'open_credit', 'max_profit'):
+    for k in ('open_margin', 'max_profit'):
         result_df[k] *= 100
 
-    return result_df
+    # Finally, re-arrange the columns to be allow the future use of even more
+    # legs.
+    return result_df[[
+        'open_margin',
+        'max_profit',
+        'minutes_to_expiry',
+
+        'leg1_type',
+        'leg1_strike',
+        'leg1_credit',
+        'leg1_volume',
+        'leg1_volatility',
+        'leg1_delta',
+        'leg1_gamma',
+        'leg1_theta',
+        'leg1_vega',
+        'leg1_rho',
+        'leg1_openInterest',
+
+        'leg2_type',
+        'leg2_strike',
+        'leg2_credit',
+        'leg2_volume',
+        'leg2_volatility',
+        'leg2_delta',
+        'leg2_gamma',
+        'leg2_theta',
+        'leg2_vega',
+        'leg2_rho',
+        'leg2_openInterest'
+    ]]
 
 def bull_bear_phase_spread(ticker):
     '''
