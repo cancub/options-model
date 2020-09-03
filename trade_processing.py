@@ -215,7 +215,7 @@ def collect_spreads(
     # And the threads will put their resulting DataFrames into this queue
     profits_q = multiprocessing.Queue()
 
-    tik_exp_df = utils.retrieve_options(ticker, expiry)
+    tik_exp_df = utils.load_options(ticker, expiry)
 
     result_df_list = []
 

@@ -28,7 +28,7 @@ def get_last_backup_path():
         )[-1]
     )
 
-def retrieve_options(ticker, expiry=None):
+def load_options(ticker, expiry=None):
     # Determine the last backup file
     last_backup = get_last_backup_path()
 
