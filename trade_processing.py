@@ -177,7 +177,8 @@ def spread_worker(id, bid_df, ask_df, buy_strikes, profits, get_sell_strikes,
 
 def collect_spreads(
         ticker, expiry, directions=['bull', 'bear'],
-        options=['c','p'], vertical=True, num_procs=10, verbose=False):
+        options=['c','p'], vertical=True, num_procs=10, verbose=False,
+        debug=False):
     # Error checking
     if not isinstance(directions, list):
         raise TypeError(
@@ -274,7 +275,7 @@ def collect_spreads(
                 buy_strikes.put(s)
 
             spread_list = []
-            if num_procs > 1:
+            if not debug:
                 processes = []
                 for i in range(num_procs):
                     p = multiprocessing.Process(
