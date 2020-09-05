@@ -308,37 +308,7 @@ def collect_spreads(
     for k in ('open_margin', 'max_profit'):
         result_df[k] *= 100
 
-    # Finally, re-arrange the columns to be allow the future use of even more
-    # legs.
-    return result_df[[
-        'open_margin',
-        'max_profit',
-        'minutes_to_expiry',
-
-        'leg1_type',
-        'leg1_strike',
-        'leg1_credit',
-        'leg1_volume',
-        'leg1_volatility',
-        'leg1_delta',
-        'leg1_gamma',
-        'leg1_theta',
-        'leg1_vega',
-        'leg1_rho',
-        'leg1_openInterest',
-
-        'leg2_type',
-        'leg2_strike',
-        'leg2_credit',
-        'leg2_volume',
-        'leg2_volatility',
-        'leg2_delta',
-        'leg2_gamma',
-        'leg2_theta',
-        'leg2_vega',
-        'leg2_rho',
-        'leg2_openInterest'
-    ]]
+    return result_df
 
 def bull_bear_phase_spread(ticker):
     '''
