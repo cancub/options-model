@@ -65,6 +65,30 @@ def load_spreads(ticker, expiry, verbose=False):
 
     return df
 
+def sort_trades_df_columns(trades_df):
+    # We don't know what order the data came in wrt columns, but we know the
+    # order we want it in
+    meta_cols = ['open_margin', 'max_profit', 'minutes_to_expiry']
+    leg_col_names = '''
+        leg{num}_type
+        leg{num}_strike
+        leg{num}_credit
+        leg{num}_volume
+        leg{num}_volatility
+        leg{num}_delta
+        leg{num}_gamma
+        leg{num}_theta
+        leg{num}_vega
+        leg{num}_rho
+        leg{num}_openInterest
+    '''
+    for i in range(1,5):
+        if 'leg{}_type'.format(i) not in trades_df.columns:
+            break
+        meta_cols += leg_col_names.format(num=i).split()
+
+    return trades_df[meta_cols]
+
 def normalize_metadata_columns(trades_df):
     # We must not normalize the leg types since these columns are categorical.
     # So we give these specific columns mean 0 std 1 to make them unchanged
