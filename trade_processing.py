@@ -277,18 +277,14 @@ def collect_spreads(
             spread_df = profits_q.get()
 
         # Add in a column showing which option type was in use for each leg.
-        # Make sure to put this at the head of the trade metadata, since we
-        # don't want to normalize this value, but rather everything to the
-        # right of it
-        if o == 'C':
-            type_array = np.zeros(spread_df.shape[0])
-        else:
-            type_array = np.ones(spread_df.shape[0])
+        # Use the values of 1 and -1 to that 0 can be used to signify an empty
+        # leg when working with the model
+        type_array = np.ones(spread_df.shape[0])
         for leg in ['leg1', 'leg2']:
             spread_df.insert(
                 0,
                 leg + '_type',
-                type_array
+                (-1 if o == 'P' else 1) * type_array
             )
 
         result_df_list.append(spread_df)
