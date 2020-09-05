@@ -65,6 +65,30 @@ def load_spreads(ticker, expiry, verbose=False):
 
     return df
 
+def normalize_metadata_columns(trades_df):
+    # We must not normalize the leg types since these columns are categorical.
+    # So we give these specific columns mean 0 std 1 to make them unchanged
+    # after the normalization operation
+    meta_means = trades_df.mean()
+    meta_stds = trades_df.std()
+
+    for i in range(1, 5):
+        type_str = 'leg{}_type'.format(i)
+        if type_str not in trades_df.columns:
+            break
+        meta_means[type_str] = 0
+        meta_stds[type_str] = 1
+
+    # Also ignore the selection data
+    meta_means.open_margin = 0
+    meta_means.max_profit = 0
+    meta_stds.open_margin = 1
+    meta_stds.max_profit = 1
+
+    normalized_df = (trades_df - meta_means) / meta_stds
+
+    return normalized_df, meta_means, meta_stds
+
 def calculate_fee(count, both_sides=False):
     fee = BASE_FEE + count
     if both_sides:
