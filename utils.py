@@ -44,18 +44,24 @@ def load_options(ticker, expiry=None):
 
     return df
 
-def load_spreads(ticker, expiry):
-    df_path = os.path.join(
-        config.TRADES_DIR, '{}_{}_spreads'.format(ticker, expiry))
-
-    # First see if we've already built these spreads
+def load_spreads(ticker, expiry, verbose=False):
+    filepath = os.path.join(
+        config.ML_DATA_DIR, '{}_{}_spreads.bz2'.format(ticker, expiry))
+    if verbose:
+        print('Attempting to load saved spreads')
     try:
-        df = pd.read_pickle(df_path)
+        df = pd.read_pickle(filepath)
+        print('Loaded')
+        return df
     except FileNotFoundError:
-        # Nope, so load them
-        df = tp.collect_spreads(ticker=ticker, expiry=expiry)
-        # And then save them for next time
-        df.to_pickle(df_path)
+        if verbose:
+            print('No spreads saved. Building spreads')
+        df = sort_trades_df_columns(
+            tp.collect_spreads(ticker, expiry, verbose=verbose))
+        # Save these so that we don't have to reload them next time
+        if verbose:
+            print('Saving spreads to file: {}'.format(filepath))
+        df.to_pickle(filepath)
 
     return df
 
