@@ -220,6 +220,8 @@ def collect_spreads(
     result_df_list = []
 
     for o in ('C', 'P'):
+        if verbose:
+            print('Working on spreads based on ' + o)
         # These three DataFrames are used over and over by all of the workers.
         option_type_df = tik_exp_df.xs(o, level=1)
         bid_df = option_type_df['bidPrice'].unstack(level=[1])
