@@ -113,6 +113,36 @@ def normalize_metadata_columns(trades_df):
 
     return normalized_df, meta_means, meta_stds
 
+def collect_winners_and_hard_losers(trades_df,
+                                    winning_profit=0,
+                                    l_to_w_ratio=3):
+
+    total_trades = len(trades_df)
+
+    # Determine the max profits when purchasing one of these trades
+    profit_less_fees = trades_df.max_profit - calculate_fee(1, both_sides=True)
+
+    losers = trades_df[profit_less_fees < winning_profit]
+    winners = trades_df[profit_less_fees >= 0]
+    total_winners = len(winners)
+    total_losers = len(losers)
+
+    print(
+        '{} ({:.1%}) winners\n{} ({:.1%}) losers'.format(
+            total_winners, total_winners / total_trades,
+            total_losers, total_losers / total_trades
+        )
+    )
+
+    # Get at most the desired ratio of losers to winners, using the losers that
+    # were closest to profit
+    losers_to_get = total_winners * l_to_w_ratio
+
+    return pd.concat((
+        winners,
+        losers.sort_values(by='max_profit', ascending=False)[:losers_to_get]
+    ))
+
 def calculate_fee(count, both_sides=False):
     fee = BASE_FEE + count
     if both_sides:
