@@ -59,23 +59,22 @@ def spread_worker(
             break
 
         total_trades = 0
-        long_bids = bid_df[buy_strike]
+        leg1_bids = bid_df[buy_strike]
+        leg1_asks = ask_df[buy_strike]
 
         # Get the strikes for the legs we will sell short in combinations with
         # the long leg
-        all_sell_strikes = all_strikes[all_strikes != buy_strike]
-
-        short_bids = bid_df[all_sell_strikes]
+        leg2_bids = bid_df[all_strikes[all_strikes != buy_strike]]
 
         # Subtract the value we're paying to open the long leg of the trade
-        open_credits = short_bids.sub(ask_df[buy_strike], axis='rows')
+        open_credits = leg2_bids.sub(leg1_asks, axis='rows')
 
         # Set all of the too-expensive opens to NaN so that we can ignore them
         # Note that we need to fill all the NaN in this original bid DataFrames
         # with 0 so that we don't make the mistake of counting
         #   3 gagillion + NaN = NaN
         # as "OK"
-        open_margin = short_bids.fillna(0).add(long_bids.fillna(0), axis='rows')
+        open_margin = leg2_bids.fillna(0).add(leg1_bids.fillna(0), axis='rows')
         open_credits[open_margin > config.MARGIN] = np.nan
 
         # Get rid of all timepoints that have no viable opens for any
@@ -95,7 +94,7 @@ def spread_worker(
 
         # Get all the (negative) credits from buying options to close out the
         # short legs
-        short_asks = -ask_df[viable_strikes]
+        leg2_asks = -ask_df[viable_strikes]
 
         leg1_dfs = []
 
@@ -106,15 +105,15 @@ def spread_worker(
             # use for closing trades
             # NOTE: we can't close a trade right after we open it, hence
             #       skipping the first open time with .iloc[1:]
-            close_long_bids = long_bids[open_time:].iloc[1:]
-            if close_long_bids.shape[0] == 0:
+            leg1_close_bids = leg1_bids[open_time:].iloc[1:]
+            if leg1_close_bids.shape[0] == 0:
                 continue
-            first_close_time = close_long_bids.index[0]
+            first_close_time = leg1_close_bids.index[0]
 
             # Figure out how much credit we would receive for closing out the
             # trades at each of the viable close times
-            close_credits = short_asks.loc[first_close_time:].add(
-                close_long_bids, axis='rows')
+            close_credits = leg2_asks.loc[first_close_time:].add(
+                leg1_close_bids, axis='rows')
 
             # Take the maximum total close credits for each strike and add them
             # to theit respective total open credits
