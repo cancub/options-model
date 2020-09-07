@@ -201,6 +201,7 @@ def spread_worker(
 def collect_spreads(
     ticker,
     expiry,
+    options_df=None,
     vertical=True,
     num_procs=10,
     verbose=False,
@@ -215,7 +216,8 @@ def collect_spreads(
     # And the threads will put their resulting DataFrames into this queue
     profits_q = multiprocessing.Queue()
 
-    tik_exp_df = utils.load_options(ticker, expiry)
+    if options_df is None:
+        options_df = utils.load_options(ticker, expiry)
 
     result_df_list = []
 
@@ -223,7 +225,7 @@ def collect_spreads(
         if verbose:
             print('Working on spreads based on ' + o)
         # These three DataFrames are used over and over by all of the workers.
-        option_type_df = tik_exp_df.xs(o, level=1)
+        option_type_df = options_df.xs(o, level=1)
         bid_df = option_type_df['bidPrice'].unstack(level=[1])
         ask_df = option_type_df['askPrice'].unstack(level=[1])
 
