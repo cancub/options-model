@@ -124,9 +124,6 @@ def spread_worker(
             max_profits.dropna(inplace=True)
             max_profits_strikes = max_profits.index
 
-            # Get the times associated with the above profits
-            max_profit_closes = close_credits.idxmax()[max_profits_strikes]
-
             # Use only the elements from the open credits that correspond the to
             # strikes we were unable to use
             open_time_credits = open_credits.loc[open_time, max_profits_strikes]
