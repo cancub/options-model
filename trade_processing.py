@@ -96,6 +96,10 @@ def spread_worker(
         # short legs
         leg2_asks = -ask_df[viable_strikes]
 
+        # We can now calculate all of the close credits at all timepoints for
+        # viable leg2 strikes
+        close_credits = leg2_asks.add(leg1_bids, axis='rows')
+
         leg1_dfs = []
 
         # Ok, now for each viable open time, figure out the maximum
@@ -112,12 +116,13 @@ def spread_worker(
 
             # Figure out how much credit we would receive for closing out the
             # trades at each of the viable close times
-            close_credits = leg2_asks.loc[first_close_time:].add(
-                leg1_close_bids, axis='rows')
+            possible_close_credits = close_credits.loc[first_close_time:]
 
             # Take the maximum total close credits for each strike and add them
             # to theit respective total open credits
-            max_profits = open_credits.loc[open_time].add(close_credits.max())
+            max_profits = open_credits.loc[open_time].add(
+                possible_close_credits.max())
+
             # Get rid of the trades we weren't able to close out using this
             # opening time
             max_profits.dropna(inplace=True)
