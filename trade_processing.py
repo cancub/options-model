@@ -24,7 +24,6 @@ def get_stock_prices(ticker, working_dir='pickles'):
 
 # ============================== Vertical spreads ==============================
 
-# TODO: look at _all_ trades, irresective of direction
 def spread_worker(
     id,
     option_type_df,
@@ -82,8 +81,9 @@ def spread_worker(
         open_credits.dropna(axis=0, how='all', inplace=True)
         viable_opens = open_credits.index
 
-        if len(viable_opens) == 0 and verbose:
-            print('{:>2}: count({}) = 0'.format(id, int(buy_strike)))
+        if len(viable_opens) == 0:
+            if verbose:
+                print('{:>2}: count({}) = 0'.format(id, int(buy_strike)))
             continue
 
         # We know that there is at least one short strike that is viable. So now
