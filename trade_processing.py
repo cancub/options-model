@@ -73,24 +73,18 @@ def spread_worker(
         # with 0 so that we don't make the mistake of counting
         #   3 gagillion + NaN = NaN
         # as "OK"
-        open_margin = leg2_bids.fillna(0).add(leg1_bids.fillna(0), axis='rows')
-        open_credits[open_margin > config.MARGIN] = np.nan
+        open_margins = leg2_bids.fillna(0).add(leg1_bids.fillna(0), axis='rows')
+        open_credits[open_margins > config.MARGIN] = np.nan
+        non_nan_opens = open_credits.notna()
 
-        # Get rid of all timepoints that have no viable opens for any
-        # combination
-        open_credits.dropna(axis=0, how='all', inplace=True)
-        viable_opens = open_credits.index
+        # Skip all timepoints and strikes that have no viable opens
+        viable_opens = open_credits.index[non_nan_opens.any(axis=1)]
+        viable_strikes = open_credits.columns[non_nan_opens.any(axis=0)]
 
         if len(viable_opens) == 0:
             if verbose:
                 print('{:>2}: count({}) = 0'.format(id, int(buy_strike)))
             continue
-
-        # We know that there is at least one short strike that is viable. So now
-        # we get rid of short strikes representing combinations that have no
-        # viable opens
-        open_credits.dropna(axis=1, how='all', inplace=True)
-        viable_strikes = open_credits.columns
 
         # Get all the (negative) credits from buying options to close out the
         # short legs
@@ -131,7 +125,7 @@ def spread_worker(
             # Use only the elements from the open credits that correspond the to
             # strikes we were unable to use
             open_time_credits = open_credits.loc[open_time, max_profits_strikes]
-            open_time_margin = open_margin.loc[open_time, max_profits_strikes]
+            open_time_margin = open_margins.loc[open_time, max_profits_strikes]
 
             # Double check that we didn't mess this up earlier
             if open_time_margin.max() > config.MARGIN:
