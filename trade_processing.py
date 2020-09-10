@@ -101,13 +101,13 @@ def build_spread_profits(
         # strikes we were able to use
         open_time_margins = open_margins.loc[open_time, max_profits_strikes]
 
-        # Double check that we didn't mess this up earlier
-        assert(open_time_margins.max() <= config.MARGIN)
-
         total_trades = len(max_profits)
 
         if total_trades == 0:
             continue
+
+        # Double check that we didn't mess this up earlier
+        assert(open_time_margins.max() <= config.MARGIN)
 
         # Finally, use the data to build the DataFrame
         dfs.append(
@@ -118,6 +118,9 @@ def build_spread_profits(
                 'leg2_strike': max_profits_strikes,
             })
         )
+
+    if len(dfs) == 0:
+        return None
 
     return pd.concat(dfs).reset_index(drop=True)
 
@@ -198,7 +201,10 @@ def spread_worker(
                                           viable_opens,
                                           open_margins)
 
-        total_trades = leg1_df.shape[0]
+        try:
+            total_trades = leg1_df.shape[0]
+        except AttributeError:
+            total_trades = 0
         if verbose:
             print('{:>2}: count({}) = {}'.format(
                 id, int(buy_strike), total_trades))
