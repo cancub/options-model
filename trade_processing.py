@@ -24,6 +24,103 @@ def get_stock_prices(ticker, working_dir='pickles'):
 
 # ============================== Vertical spreads ==============================
 
+def build_spread_trades(viable_strikes, viable_opens, open_margins):
+    # Skip all columns and rows that have no viable opens
+    viable_margins = open_margins.loc[viable_opens, viable_strikes]
+
+    # Rotate the strikes and pull them and in index into columns
+    return_df = viable_margins.stack(level=0).reset_index(level=[0,1])
+
+    # Rename the time and margin indices
+    return_df.rename(
+        columns={
+            'datetime': 'open_time',
+            'strike': 'leg2_strike',
+            0: 'open_margin'
+        },
+        inplace=True
+    )
+
+    # Remove all rows where the margin is NaN
+    return_df.dropna(subset=['open_margin'], inplace=True)
+
+    return return_df
+
+def build_spread_profits(
+    leg1_bids,
+    leg2_asks,
+    viable_opens,
+    open_margins,
+    open_credits
+):
+
+    dfs = []
+
+    # We can now calculate all of the close credits at all timepoints for
+    # viable leg2 strikes
+    close_credits = leg2_asks.add(leg1_bids, axis='rows')
+
+    # Ok, now for each viable open time, figure out the maximum
+    # profit if we were to close at the same time
+    for open_time in viable_opens:
+        # Whittle the long option bids df down to the timepoints that we can
+        # use for closing trades
+        # NOTE: we can't close a trade right after we open it, hence
+        #       skipping the first open time with .iloc[1:]
+        leg1_close_bids = leg1_bids[open_time:].iloc[1:]
+        if leg1_close_bids.shape[0] == 0:
+            continue
+        first_close_time = leg1_close_bids.index[0]
+
+        # Figure out how much credit we would receive for closing out the
+        # trades at each of the viable close times
+        possible_close_credits = close_credits.loc[first_close_time:]
+
+        # Take the maximum total close credits for each strike and add them
+        # to theit respective total open credits
+        max_profits = open_credits.loc[open_time].add(
+            possible_close_credits.max())
+
+        # Get rid of the trades we weren't able to close out using this
+        # opening time
+        # TODO: fill in with the presumed profits
+        #       That is,
+        #           if we could close out leg1 but not leg2
+        #               collect best credit for leg1 and assume full profit
+        #               for leg2 (since they expire worthless)
+        #           if we could close out leg2 but not leg1
+        #               collect the highest credit we would receive for
+        #               leg2 and eat the full loss from leg1
+        #           if we could not close out either leg
+        #               eat the full loss for leg1 and assume the full
+        #               profit for leg2
+        max_profits.dropna(inplace=True)
+        max_profits_strikes = max_profits.index
+
+        # Use only the elements from the open margins that correspond the to
+        # strikes we were able to use
+        open_time_margins = open_margins.loc[open_time, max_profits_strikes]
+
+        # Double check that we didn't mess this up earlier
+        assert(open_time_margins.max() <= config.MARGIN)
+
+        total_trades = len(max_profits)
+
+        if total_trades == 0:
+            continue
+
+        # Finally, use the data to build the DataFrame
+        dfs.append(
+            pd.DataFrame({
+                'open_time': np.full(total_trades, open_time),
+                'open_margin': open_time_margins,
+                'max_profit': max_profits,
+                'leg2_strike': max_profits_strikes,
+            })
+        )
+
+    return pd.concat(dfs).reset_index(drop=True)
+
 def spread_worker(
     id,
     option_type_df,
@@ -32,6 +129,7 @@ def spread_worker(
     all_strikes,
     buy_strikes_q,
     profits_q,
+    get_max_profit=False,
     verbose=False
 ):
     '''
@@ -57,7 +155,6 @@ def spread_worker(
         except queue.Empty:
             break
 
-        total_trades = 0
         leg1_bids = bid_df[buy_strike]
         leg1_asks = ask_df[buy_strike]
 
@@ -86,80 +183,33 @@ def spread_worker(
                 print('{:>2}: count({}) = 0'.format(id, int(buy_strike)))
             continue
 
-        # Get all the (negative) credits from buying options to close out the
-        # short legs
-        leg2_asks = -ask_df[viable_strikes]
+        # At this point we know which combinations of legs are available for a
+        # trade, when they can be made and how much margin will it take to make
+        # them. Build the remainder of the data based on whether the maximum
+        # profit of each trade is required.
+        if get_max_profit:
+            leg1_df = build_spread_profits(leg1_bids,
+                                            -ask_df[viable_strikes],
+                                            viable_opens,
+                                            open_margins,
+                                            open_credits)
+        else:
+            leg1_df = build_spread_trades(viable_strikes,
+                                          viable_opens,
+                                          open_margins)
 
-        # We can now calculate all of the close credits at all timepoints for
-        # viable leg2 strikes
-        close_credits = leg2_asks.add(leg1_bids, axis='rows')
-
-        leg1_dfs = []
-
-        # Ok, now for each viable open time, figure out the maximum
-        # profit if we were to close at the same time
-        for open_time in viable_opens:
-            # Whittle the long option bids df down to the timepoints that we can
-            # use for closing trades
-            # NOTE: we can't close a trade right after we open it, hence
-            #       skipping the first open time with .iloc[1:]
-            leg1_close_bids = leg1_bids[open_time:].iloc[1:]
-            if leg1_close_bids.shape[0] == 0:
-                continue
-            first_close_time = leg1_close_bids.index[0]
-
-            # Figure out how much credit we would receive for closing out the
-            # trades at each of the viable close times
-            possible_close_credits = close_credits.loc[first_close_time:]
-
-            # Take the maximum total close credits for each strike and add them
-            # to theit respective total open credits
-            max_profits = open_credits.loc[open_time].add(
-                possible_close_credits.max())
-
-            # Get rid of the trades we weren't able to close out using this
-            # opening time
-            max_profits.dropna(inplace=True)
-            max_profits_strikes = max_profits.index
-
-            # Use only the elements from the open credits that correspond the to
-            # strikes we were unable to use
-            open_time_credits = open_credits.loc[open_time, max_profits_strikes]
-            open_time_margin = open_margins.loc[open_time, max_profits_strikes]
-
-            # Double check that we didn't mess this up earlier
-            if open_time_margin.max() > config.MARGIN:
-                raise Exception('Error with maximum open credit')
-
-            total_trades_for_open = len(max_profits)
-
-            if total_trades_for_open == 0:
-                continue
-
-            total_trades += total_trades_for_open
-
-            # Finally, use the data to build the DataFrame
-            leg1_dfs.append(
-                pd.DataFrame({
-                    'open_time'   : np.full(total_trades_for_open, open_time),
-                    'open_margin' : open_time_margin,
-                    'max_profit'  : max_profits,
-                    'leg2_strike'   : max_profits_strikes,
-                })
-            )
-
+        total_trades = leg1_df.shape[0]
         if verbose:
             print('{:>2}: count({}) = {}'.format(
                 id, int(buy_strike), total_trades))
         if total_trades == 0:
             continue
 
-        leg1_df = pd.concat(leg1_dfs).reset_index(drop=True)
         all_open_times = leg1_df.open_time
         leg2_strikes = leg1_df.leg2_strike
 
         leg1_strikes = np.full(total_trades, buy_strike)
-        leg1_df.insert(3, 'leg1_strike', leg1_strikes)
+        leg1_df.insert(0, 'leg1_strike', leg1_strikes)
 
         leg1_meta = option_type_df.loc[
             zip(all_open_times, leg1_strikes)].reset_index(drop=True)
@@ -199,6 +249,7 @@ def collect_spreads(
     options_df=None,
     vertical=True,
     num_procs=10,
+    get_max_profit=False,
     verbose=False,
     debug=False
 ):
@@ -245,6 +296,7 @@ def collect_spreads(
                         all_strikes,
                         buy_strikes_q,
                         profits_q,
+                        get_max_profit,
                         verbose,
                     )
                 )
@@ -271,6 +323,7 @@ def collect_spreads(
                 all_strikes,
                 buy_strikes_q,
                 profits_q,
+                get_max_profit,
                 verbose,
             )
             spread_df = profits_q.get()
@@ -304,10 +357,13 @@ def collect_spreads(
     )
 
     # Show the true values of the trade
-    for k in ('open_margin', 'max_profit'):
+    to_centify = ['open_margin']
+    if get_max_profit:
+        to_centify.append('max_profit')
+    for k in to_centify:
         result_df[k] *= 100
 
-    return result_df
+    return result_df.reset_index(drop=True)
 
 def bull_bear_phase_spread(ticker):
     '''
