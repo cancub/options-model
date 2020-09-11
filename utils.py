@@ -44,22 +44,27 @@ def load_options(ticker, expiry=None):
 
     return df
 
-def load_spreads(ticker, expiry, verbose=False):
+def load_spreads(ticker, expiry, refresh=False, save=True, verbose=False):
     filepath = os.path.join(
         config.ML_DATA_DIR, '{}_{}_spreads.bz2'.format(ticker, expiry))
-    if verbose:
-        print('Attempting to load saved spreads')
-    try:
-        df = pd.read_pickle(filepath)
-        print('Loaded')
-        return df
-    except FileNotFoundError:
+    if not refresh:
         if verbose:
-            print('No spreads saved. Building spreads')
-        df = sort_trades_df_columns(
-            tp.collect_spreads(
-                ticker, expiry, get_max_profit=True, verbose=verbose)
-        )
+            print('Attempting to load saved spreads')
+        try:
+            df = pd.read_pickle(filepath)
+            print('Loaded')
+            return df
+        except FileNotFoundError:
+            if verbose:
+                print('No spreads saved.')
+
+    if verbose:
+        print('Building spreads.')
+    df = sort_trades_df_columns(
+        tp.collect_spreads(
+            ticker, expiry, get_max_profit=True, verbose=verbose)
+    )
+    if save:
         # Save these so that we don't have to reload them next time
         if verbose:
             print('Saving spreads to file: {}'.format(filepath))
