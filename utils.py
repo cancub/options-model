@@ -1,13 +1,18 @@
 import datetime as dt
 from   io import BytesIO
+import json
 import numpy as np
 import os
 import pandas as pd
 import re
 import subprocess as sp
+import tarfile
+import tempfile
 
 import config
 import trade_processing as tp
+
+from tensorflow import keras
 
 BASE_FEE = 9.95
 
@@ -69,6 +74,61 @@ def load_spreads(ticker, expiry, refresh=False, save=True, verbose=False):
         df.to_pickle(filepath)
 
     return df
+
+def get_predictions(ticker, viable_spreads, max_margin=np.inf, min_profit = 0):
+    viable_spreads = sort_trades_df_columns(viable_spreads)
+
+    # Find the model related to these values which has the lowest loss
+    model_dir = os.path.join(config.ML_MODELS_DIR, ticker)
+    best_model_tarball = None
+    lowest_loss = np.inf
+    for fname in (f for f in os.listdir(model_dir) if f.endswith('.tar')):
+        fpath = os.path.join(model_dir, fname)
+
+        # Get the metadata
+        meta = json.loads(sp.check_output(['tar', '-xOf', fpath, 'metadata']))
+
+        # Check the criteria
+        if (meta['max_margin'] < max_margin
+                or meta['min_profit'] != min_profit
+                or meta['loss'] >= lowest_loss):
+            continue
+        lowest_loss = meta['loss']
+        best_model_tarball = fpath
+
+    # Load the model and statistics from the tarball
+    model_tarball = tarfile.open(best_model_tarball)
+    with tempfile.TemporaryDirectory() as tmpdir:
+
+        # Extract the model into a temporary directory
+        model_tarball.extractall(tmpdir)
+
+        # Load the model
+        model = keras.models.load_model(
+            os.path.join(tmpdir, 'checkpoint'), compile=False)
+
+        # Load the stats
+        means = pd.read_pickle(os.path.join(tmpdir, 'means'))
+        stds = pd.read_pickle(os.path.join(tmpdir, 'stds'))
+
+    # We need to compile to continue
+    model.compile(
+        loss=keras.losses.BinaryCrossentropy(from_logits=True))
+
+    examples = viable_spreads.drop(['open_margin'], axis=1)
+
+    # Make sure we have the right columns in the right order
+    means = means[examples.columns]
+    stds = stds[examples.columns]
+
+    # Normalize
+    examples = (examples - means) / stds
+
+    # Get the predictions
+    results = model.predict(examples.values)
+    viable_spreads.insert(0, 'confidence', results)
+
+    return viable_spreads.sort_values(by=['confidence'], ascending=False)
 
 def sort_trades_df_columns(trades_df):
     # We don't know what order the data came in wrt columns, but we know the
