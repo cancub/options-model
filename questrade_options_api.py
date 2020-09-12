@@ -12,7 +12,7 @@ TODO:
 - convert _company_check() to decorator
 '''
 
-EXPIRY_FORMAT = '%Y-%m-%dT%H:%M:%S.%f%z'
+QUESTRADE_TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%f%z'
 
 class QuestradeTickerOptions(Questrade):
 
@@ -79,6 +79,12 @@ class QuestradeTickerOptions(Questrade):
                 ('This operation requires a company to have been loaded via '
                  'load_company().'))
 
+    def get_server_datetime(self):
+        return datetime.strptime(self.time['time'], QUESTRADE_TIME_FORMAT)
+
+    def get_timezone(self):
+        return self.get_server_datetime().tzinfo
+
     def load_company(self, ticker):
         # There may be many different objects making requests simultaneously, so
         # we want to attempt to stagger them with ticker-dependent random waits
@@ -136,7 +142,8 @@ class QuestradeTickerOptions(Questrade):
 
             # Once we've found the data, we don't care about the minutiae of the
             # timezone and milliseconds
-            dir_date = str(datetime.strptime(ex_date, EXPIRY_FORMAT).date())
+            dir_date = str(
+                datetime.strptime(ex_date, QUESTRADE_TIME_FORMAT).date())
 
             # Gather up the series for this expiry.
             quotes = self._overload_robust_request(

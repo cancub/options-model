@@ -10,8 +10,14 @@ import pandas as pd
 import config
 from questrade_options_api import QuestradeTickerOptions
 
-# The seconds and microseconds are just clutter
-NOW_DT = datetime.datetime.now().replace(second=0, microsecond=0)
+# Get the API object. No arguments implies we want to automatically reload and
+# refresh the token.
+QT = QuestradeTickerOptions()
+
+# The seconds and microseconds are just clutter. Also set the timezone of the
+# current time based on the server.
+NOW_DT = datetime.datetime.now().replace(
+    second=0, microsecond=0, tzinfo=QT.get_timezone())
 
 # The function to use in threading
 def options_gofer(q_obj, ticker):
@@ -51,16 +57,12 @@ def options_gofer(q_obj, ticker):
     # Save the new ticker DataFrame to file
     ticker_df.to_pickle(ticker_path)
 
-# Get the API object. No arguments implies we want to automatically reload and
-# refresh the token.
-q = QuestradeTickerOptions()
-
 processes = []
 
 for ticker in config.TICKERS:
     p = multiprocessing.Process(
         target=options_gofer,
-        args=(deepcopy(q), ticker,)
+        args=(deepcopy(QT), ticker,)
     )
     p.start()
     processes.append(p)
