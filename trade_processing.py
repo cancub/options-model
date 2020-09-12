@@ -51,7 +51,8 @@ def build_spread_profits(
     leg2_asks,
     viable_opens,
     open_margins,
-    open_credits
+    open_credits,
+    max_margin=config.MARGIN
 ):
 
     dfs = []
@@ -107,7 +108,7 @@ def build_spread_profits(
             continue
 
         # Double check that we didn't mess this up earlier
-        assert(open_time_margins.max() <= config.MARGIN)
+        assert(open_time_margins.max() <= max_margin)
 
         # Finally, use the data to build the DataFrame
         dfs.append(
@@ -133,6 +134,7 @@ def spread_worker(
     buy_strikes_q,
     profits_q,
     get_max_profit=False,
+    max_margin=config.MARGIN,
     verbose=False
 ):
     '''
@@ -174,7 +176,7 @@ def spread_worker(
         #   3 gagillion + NaN = NaN
         # as "OK"
         open_margins = leg2_bids.fillna(0).add(leg1_bids.fillna(0), axis='rows')
-        open_credits[open_margins > config.MARGIN] = np.nan
+        open_credits[open_margins > max_margin] = np.nan
         non_nan_opens = open_credits.notna()
 
         # Skip all timepoints and strikes that have no viable opens
@@ -192,10 +194,11 @@ def spread_worker(
         # profit of each trade is required.
         if get_max_profit:
             leg1_df = build_spread_profits(leg1_bids,
-                                            -ask_df[viable_strikes],
-                                            viable_opens,
-                                            open_margins,
-                                            open_credits)
+                                           -ask_df[viable_strikes],
+                                           viable_opens,
+                                           open_margins,
+                                           open_credits,
+                                           max_margin)
         else:
             leg1_df = build_spread_trades(viable_strikes,
                                           viable_opens,
@@ -255,6 +258,7 @@ def collect_spreads(
     options_df=None,
     vertical=True,
     num_procs=10,
+    max_margin=config.MARGIN,
     get_max_profit=False,
     verbose=False,
     debug=False
@@ -303,6 +307,7 @@ def collect_spreads(
                         buy_strikes_q,
                         profits_q,
                         get_max_profit,
+                        max_margin,
                         verbose,
                     )
                 )
@@ -330,6 +335,7 @@ def collect_spreads(
                 buy_strikes_q,
                 profits_q,
                 get_max_profit,
+                max_margin,
                 verbose,
             )
             spread_df = profits_q.get()
