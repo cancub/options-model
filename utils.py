@@ -60,10 +60,8 @@ def load_spreads(ticker, expiry, refresh=False, save=True, verbose=False):
 
     if verbose:
         print('Building spreads.')
-    df = sort_trades_df_columns(
-        tp.collect_spreads(
+    df = tp.collect_spreads(
             ticker, expiry, get_max_profit=True, verbose=verbose)
-    )
     if save:
         # Save these so that we don't have to reload them next time
         if verbose:
