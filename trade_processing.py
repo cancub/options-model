@@ -5,6 +5,8 @@ import os
 import pandas as pd
 import queue
 
+from questrade_helpers import QuestradeSecurities
+
 import config
 import utils
 
@@ -355,12 +357,23 @@ def collect_spreads(
 
     result_df = pd.concat(result_df_list)
 
-    # Convert open_time to minutes_to_expiry. Make sure to put this right after
-    # the type columns, since this is something that we want to use for the
-    # models, but it's also something we want to normalize
-    expiry_dt = datetime.strptime(expiry, '%Y-%m-%d')
-    expiry_dt += timedelta(hours=16)
-    time_to_expiry = expiry_dt - result_df.open_time
+    if verbose:
+        print('Adding underlying price')
+
+    qs = QuestradeSecurities()
+    candles = qs.get_candlesticks(
+        ticker,
+        result_df.open_time.min()-timedelta(minutes=5),
+        result_df.open_time.max(),
+        'FiveMinutes'
+    )
+    prices_df = pd.DataFrame(
+        data = [c['open'] for c in candles],
+        index = pd.to_datetime([c['end'] for c in candles]),
+    )
+
+    result_df['stock_price'] = prices_df.loc[result_df.open_time].values[:,0]
+
     result_df.drop('open_time', axis=1, inplace=True)
     result_df.insert(
         0,

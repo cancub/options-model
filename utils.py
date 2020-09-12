@@ -75,9 +75,15 @@ def load_spreads(ticker, expiry, refresh=False, save=True, verbose=False):
 def sort_trades_df_columns(trades_df):
     # We don't know what order the data came in wrt columns, but we know the
     # order we want it in
-    meta_cols = ['open_margin', 'minutes_to_expiry']
-    if 'max_profit' in trades_df.columns:
-        meta_cols.append('max_profit')
+    meta_cols = []
+    header_cols = [
+        'open_margin',
+        'max_profit',
+        'stock_price',
+        'minutes_to_expiry'
+    ]
+    for col in (c for c in header_cols if c in trades_df.columns):
+        meta_cols.append(col)
     leg_col_names = '''
         leg{num}_type
         leg{num}_strike
