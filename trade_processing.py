@@ -1,8 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import multiprocessing
 import numpy as np
 import os
 import pandas as pd
+import pytz
 import queue
 
 from questrade_helpers import QuestradeSecurities
@@ -374,11 +375,34 @@ def collect_spreads(
 
     result_df['stock_price'] = prices_df.loc[result_df.open_time].values[:,0]
 
+    # Convert open_time to minutes_to_expiry.
+    expiry_dt = datetime.strptime(expiry, '%Y-%m-%d') + timedelta(hours=16)
+
+    # Add the time zone (is the next change in the fall or spring?)
+    transitions = pytz.timezone('America/Toronto')._utc_transition_times
+    dst = next(t for t in transitions if t > expiry_dt).month > 9
+    expiry_dt = expiry_dt.replace(
+        tzinfo = timezone(timedelta(hours = -4 if dst else -5)))
+
+    if verbose:
+        print('Converting open time to minutes to expiry')
+
+    # Here, too, we need to be aware of timezones, since there may have been
+    # a DST <-> EST shift somewhere in the data
+
+    # Get the epxiry as a UTC timedelta
+    epoch = datetime(1970, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    epoch_expiry = expiry_dt - epoch
+
+    # Get the opens as a UTC timedelta
+    epoch_opens = result_df.open_time.apply(
+        lambda x: x.astimezone(timezone.utc) - epoch)
+
     result_df.drop('open_time', axis=1, inplace=True)
     result_df.insert(
         0,
         'minutes_to_expiry',
-        time_to_expiry.apply(lambda x: x.total_seconds()) // 60
+        (epoch_expiry - epoch_opens).apply(lambda x: x.total_seconds()) // 60
     )
 
     # Show the true values of the trade
