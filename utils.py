@@ -216,7 +216,7 @@ def collect_winners_and_hard_losers(trades_df,
         losers.sort_values(by='max_profit', ascending=False)[:losers_to_get]
     ))
 
-def calculate_fee(count, both_sides=False):
+def calculate_fee(count=1, both_sides=True):
     fee = BASE_FEE + count
     if both_sides:
         fee *= 2
