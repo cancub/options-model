@@ -115,7 +115,12 @@ def get_predictions(ticker, viable_spreads, max_margin=np.inf, min_profit = 0):
     model.compile(
         loss=keras.losses.BinaryCrossentropy(from_logits=True))
 
-    examples = viable_spreads.drop(['open_margin'], axis=1)
+    # Maybe we got the margin or profits in with the spreads. These were not
+    # provided to the model and so they must be removed
+    examples = viable_spreads
+    for col in ('open_margin', 'max_profit'):
+        if col in examples.columns:
+            examples = examples.drop(col, axis=1)
 
     # Make sure we have the right columns in the right order
     means = means[examples.columns]
