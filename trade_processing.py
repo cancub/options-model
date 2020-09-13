@@ -44,7 +44,7 @@ def build_spread_trades(viable_strikes, viable_opens, open_margins):
         inplace=True
     )
 
-    # Remove all rows where the margin is NaN
+    # Remove all rows where the margin isn't viable
     return_df.dropna(subset=['open_margin'], inplace=True)
 
     return return_df
@@ -170,19 +170,18 @@ def spread_worker(
         # the long leg
         leg2_bids = bid_df[all_strikes[all_strikes != buy_strike]]
 
-        # Subtract the value we're paying to open the long leg of the trade
+        # Note that for the next two operation there will be several values that
+        # end up being NaN, since
+        #   * + NaN = NaN
+        # This is desired, since it lets us filter out impossible opens.
         open_credits = leg2_bids.sub(leg1_asks, axis='rows')
+        open_margins = leg2_bids.add(leg1_asks, axis='rows')
 
-        # Set all of the too-expensive opens to NaN so that we can ignore them
-        # Note that we need to fill all the NaN in this original bid DataFrames
-        # with 0 so that we don't make the mistake of counting
-        #   3 gagillion + NaN = NaN
-        # as "OK"
-        open_margins = leg2_bids.fillna(0).add(leg1_bids.fillna(0), axis='rows')
+        # Also get rid of all of the open margins that are too expensive
         open_credits[open_margins > max_margin] = np.nan
-        non_nan_opens = open_credits.notna()
 
-        # Skip all timepoints and strikes that have no viable opens
+        # Find the timepoints and strikes that have at least one viable open
+        non_nan_opens = open_credits.notna()
         viable_opens = open_credits.index[non_nan_opens.any(axis=1)]
         viable_strikes = open_credits.columns[non_nan_opens.any(axis=0)]
 
