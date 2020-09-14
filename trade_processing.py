@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import multiprocessing
 import numpy as np
@@ -5,6 +6,8 @@ import os
 import pandas as pd
 import pytz
 import queue
+import tempfile
+import uuid
 
 from questrade_helpers import QuestradeSecurities
 
@@ -33,7 +36,7 @@ def spread_worker(
     bid_df,
     ask_df,
     buy_strikes_q,
-    profits_q,
+    output_q,
     get_max_profit=False,
     max_margin=config.MARGIN,
     verbose=False
@@ -51,8 +54,9 @@ def spread_worker(
     rely on get_sell_strikes() to return the list of strikes to be used for the leg we
     will _sell_.
     '''
-
-    result_dataframes = []
+    hdr = 'COLLECTOR {:>2}:'.format(id)
+    if verbose:
+        print('{} START'.format(hdr))
 
     while True:
         # Grab a strike for the leg we will be longing
@@ -102,12 +106,9 @@ def spread_worker(
 
         # If there's nothing left, then we can just skip this leg 1 strike
         total_trades = leg1_df.shape[0]
-        if verbose:
-            print(
-                '{:>2}: count({}) = {}'.format(
-                    id, int(leg1_strike), total_trades)
-            )
         if total_trades == 0:
+            if verbose:
+                print('{} count({}) = 0'.format(hdr, int(leg1_strike)))
             continue
 
         # Bring all of the indices into the dataframe to be columns
@@ -128,7 +129,7 @@ def spread_worker(
         leg1_df.insert(0, 'leg1_strike', leg1_strikes)
 
         all_open_times = leg1_df.open_time
-        leg2_strikes   = leg1_df.leg2_strike
+        leg2_strikes = leg1_df.leg2_strike
 
         leg1_meta = option_type_df.loc[
             zip(all_open_times, leg1_strikes)].reset_index(drop=True)
@@ -150,46 +151,176 @@ def spread_worker(
 
         # We need to rename each of the columns
         leg1_meta.rename(
-            columns = {k: 'leg1_' + k for k in leg1_meta.keys()}, inplace=True)
+            columns={k: 'leg1_' + k for k in leg1_meta.keys()}, inplace=True)
         leg2_meta.rename(
-            columns = {k: 'leg2_' + k for k in leg2_meta.keys()}, inplace=True)
+            columns={k: 'leg2_' + k for k in leg2_meta.keys()}, inplace=True)
 
-        result_dataframes.append(
-            pd.concat((leg1_df.copy(), leg1_meta, leg2_meta), axis=1))
+        if verbose:
+            print('{} count({}) = {}'.format(
+                hdr, int(leg1_strike), total_trades))
 
-    profits_q.put(pd.concat(result_dataframes))
+        output_q.put(pd.concat((leg1_df.copy(), leg1_meta, leg2_meta), axis=1))
 
     if verbose:
-        print('{:>2}: done'.format(id))
+        print('{} COMPLETE'.format(hdr))
+
+def filesystem_worker(
+    id,
+    input_q,
+    working_dir,
+    ticker,
+    epoch,
+    epoch_expiry,
+    max_spreads,
+    option_type,
+    qs,
+    verbose=False,
+):
+    hdr = 'SAVER {:>2}:'.format(id)
+    trades_in_memory = 0
+    spread_list      = []
+    def save_piece():
+
+        if verbose:
+            print('{} saving {} spreads'.format(hdr, trades_in_memory))
+
+        # Get ready to save by building the start of the DataFrame
+        df_to_save = pd.concat(spread_list)
+
+        # Add in a column showing which option type was in use for each leg.
+        # Use the values of 1 and -1 to that 0 can be used to signify an empty
+        # leg when working with the model
+        type_array = np.ones(trades_in_memory)
+        for leg in ['leg1', 'leg2']:
+            df_to_save.insert(
+                0,
+                leg + '_type',
+                (-1 if option_type == 'P' else 1) * type_array
+            )
+
+        if verbose:
+            print('{}: adding security prices'.format(hdr))
+
+        candles = qs.get_candlesticks(
+            ticker,
+            df_to_save.open_time.min()-timedelta(minutes=5),
+            df_to_save.open_time.max(),
+            'FiveMinutes'
+        )
+        prices_df = pd.DataFrame(
+            data=[c['open'] for c in candles],
+            index=pd.to_datetime([c['end'] for c in candles]),
+        )
+
+        df_to_save['stock_price'] = prices_df.loc[
+            df_to_save.open_time].values[:, 0]
+
+        # Convert open_time to minutes_to_expiry, paying attention to timezones
+        if verbose:
+            print('{} converting open time to minutes to expiry'.format(hdr))
+
+        # Get the opens as a UTC timedelta
+        epoch_opens = df_to_save.open_time.apply(
+            lambda x: x.astimezone(timezone.utc) - epoch)
+
+        df_to_save.drop('open_time', axis=1, inplace=True)
+        df_to_save.insert(
+            0,
+            'minutes_to_expiry',
+            (epoch_expiry - epoch_opens).apply(lambda x: x.total_seconds())//60
+        )
+
+        # Show the true values of the trade
+        to_centify = ['open_margin', 'max_profit']
+        for col in (c for c in to_centify if c in df_to_save.columns):
+            df_to_save[col] *= 100
+
+        filepath = os.path.join(working_dir, str(uuid.uuid4()))
+        if verbose:
+            print('{} saving to {}'.format(hdr, filepath))
+        df_to_save.reset_index(drop=True).to_pickle(filepath)
+
+    if verbose:
+        print('{} START'.format(hdr))
+
+    while True:
+        # Grab a strike for the leg we will be longing
+        try:
+            spread_df = input_q.get(timeout=5)
+        except queue.Empty:
+            break
+
+        trades_in_memory += spread_df.shape[0]
+        spread_list.append(spread_df)
+
+        # Once we hit a critical mass of spreads, this triggers the generation
+        # of a new file into which we dump all of the loaded spreads and then
+        # continue
+        if trades_in_memory < max_spreads:
+            continue
+
+        save_piece()
+
+        # Reset the values and start filling up the buffer again
+        spread_list = []
+        trades_in_memory = 0
+
+    if trades_in_memory > 0:
+        save_piece()
+
+    if verbose:
+        print('{} COMPLETE'.format(hdr))
 
 def collect_spreads(
     ticker,
     expiry,
     options_df=None,
     vertical=True,
-    num_procs=10,
+    getter_procs=2,
+    saver_procs=5,
     max_margin=config.MARGIN,
     get_max_profit=False,
+    max_spreads_per_file=50000,
     verbose=False,
     debug=False
 ):
-    # Build the thread-specific objects. We may not be using threads, but even
-    # in this case the same thread objects can be used.
+    # Make sure that there is an output directory ready for all of the data.
+    # This directory will be returned when done
+    tmpdir = tempfile.mkdtemp(prefix='tp-')
 
     # First we need a Queue of the strikes to be used for the buying leg.
     buy_strikes_q = multiprocessing.Queue()
 
     # And the threads will put their resulting DataFrames into this queue
-    profits_q = multiprocessing.Queue()
+    working_q = multiprocessing.Queue()
 
     if options_df is None:
         options_df = utils.load_options(ticker, expiry)
 
-    result_df_list = []
+    # Get the expiry in seconds from epoch
+    epoch = datetime(1970, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    expiry_dt = datetime.strptime(expiry, '%Y-%m-%d') + timedelta(hours=16)
+
+    # Add the time zone (is the next change in the fall or spring?)
+    transitions = pytz.timezone('America/Toronto')._utc_transition_times
+    dst = next(t for t in transitions if t > expiry_dt).month > 9
+    expiry_dt = expiry_dt.replace(
+        tzinfo=timezone(timedelta(hours=-4 if dst else -5)))
+
+    # Get the epxiry as a UTC timedelta
+    epoch_expiry = expiry_dt - epoch
+
+    # Needed by the saving threads to add security prices to the DataFrame
+    qs = QuestradeSecurities()
 
     for o in ('C', 'P'):
         if verbose:
             print('Working on spreads based on ' + o)
+
+        # Make sure there's a sub directory for this specific option type
+        type_subdir = os.path.join(tmpdir, o)
+        os.mkdir(type_subdir)
+
         # These three DataFrames are used over and over by all of the workers.
         option_type_df = options_df.xs(o, level=1)
         bid_df = option_type_df['bidPrice'].unstack(level=[1])
@@ -199,38 +330,44 @@ def collect_spreads(
         for s in ask_df.columns:
             buy_strikes_q.put(s)
 
-        spread_list = []
         if not debug:
             processes = []
-            for i in range(num_procs):
+            for i in range(getter_procs):
                 p = multiprocessing.Process(
                     target=spread_worker,
-                    args=(
-                        i,
-                        option_type_df,
-                        bid_df,
-                        ask_df,
-                        buy_strikes_q,
-                        profits_q,
-                        get_max_profit,
-                        max_margin,
-                        verbose,
-                    )
+                    args=(i,
+                          option_type_df,
+                          bid_df,
+                          ask_df,
+                          buy_strikes_q,
+                          working_q,
+                          get_max_profit,
+                          max_margin,
+                          verbose,)
                 )
                 p.start()
                 processes.append(p)
 
-            # This is going to be a lot of buffered data in the Queue. The
-            # poster on this topic https://stackoverflow.com/a/26738946
-            # mentioned that we may need to read from the Queue *before* joining
-            # Maybe the better solution is to reference a semaphor
-            for _ in range(num_procs):
-                spread_list.append(profits_q.get())
+            for i in range(saver_procs):
+                p = multiprocessing.Process(
+                    target=filesystem_worker,
+                    args=(i,
+                          working_q,
+                          type_subdir,
+                          ticker,
+                          epoch,
+                          epoch_expiry,
+                          max_spreads_per_file,
+                          o,
+                          qs,
+                          verbose,)
+                )
+                p.start()
+                processes.append(p)
 
             for p in processes:
                 p.join()
 
-            spread_df = pd.concat(spread_list)
         else:
             spread_worker(
                 0,
@@ -238,83 +375,13 @@ def collect_spreads(
                 bid_df,
                 ask_df,
                 buy_strikes_q,
-                profits_q,
+                working_q,
                 get_max_profit,
                 max_margin,
                 verbose,
             )
-            spread_df = profits_q.get()
 
-        # Add in a column showing which option type was in use for each leg.
-        # Use the values of 1 and -1 to that 0 can be used to signify an empty
-        # leg when working with the model
-        type_array = np.ones(spread_df.shape[0])
-        for leg in ['leg1', 'leg2']:
-            spread_df.insert(
-                0,
-                leg + '_type',
-                (-1 if o == 'P' else 1) * type_array
-            )
-
-        result_df_list.append(spread_df)
-
-    result_df = pd.concat(result_df_list)
-
-    if verbose:
-        print('Adding underlying price')
-
-    qs = QuestradeSecurities()
-    candles = qs.get_candlesticks(
-        ticker,
-        result_df.open_time.min()-timedelta(minutes=5),
-        result_df.open_time.max(),
-        'FiveMinutes'
-    )
-    prices_df = pd.DataFrame(
-        data = [c['open'] for c in candles],
-        index = pd.to_datetime([c['end'] for c in candles]),
-    )
-
-    result_df['stock_price'] = prices_df.loc[result_df.open_time].values[:,0]
-
-    # Here, too, we need to be aware of timezones, since there may have been
-    # a DST <-> EST shift somewhere in the data
-    if verbose:
-        print('Converting open time to minutes to expiry')
-
-    # Convert open_time to minutes_to_expiry.
-    expiry_dt = datetime.strptime(expiry, '%Y-%m-%d') + timedelta(hours=16)
-
-    # Add the time zone (is the next change in the fall or spring?)
-    transitions = pytz.timezone('America/Toronto')._utc_transition_times
-    dst = next(t for t in transitions if t > expiry_dt).month > 9
-    expiry_dt = expiry_dt.replace(
-        tzinfo = timezone(timedelta(hours = -4 if dst else -5)))
-
-
-    # Get the epxiry as a UTC timedelta
-    epoch = datetime(1970, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    epoch_expiry = expiry_dt - epoch
-
-    # Get the opens as a UTC timedelta
-    epoch_opens = result_df.open_time.apply(
-        lambda x: x.astimezone(timezone.utc) - epoch)
-
-    result_df.drop('open_time', axis=1, inplace=True)
-    result_df.insert(
-        0,
-        'minutes_to_expiry',
-        (epoch_expiry - epoch_opens).apply(lambda x: x.total_seconds()) // 60
-    )
-
-    # Show the true values of the trade
-    to_centify = ['open_margin']
-    if get_max_profit:
-        to_centify.append('max_profit')
-    for k in to_centify:
-        result_df[k] *= 100
-
-    return result_df.reset_index(drop=True)
+    return tmpdir
 
 def bull_bear_phase_spread(ticker):
     '''
@@ -558,4 +625,3 @@ def jade_lizard(ticker):
     - Downside: Strike Price of short put - credit received 
     '''
     pass
-
