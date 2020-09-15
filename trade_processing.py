@@ -171,9 +171,9 @@ def filesystem_worker(
     ticker,
     epoch,
     epoch_expiry,
+    prices_df,
     max_spreads,
     option_type,
-    qs,
     verbose=False,
 ):
     hdr = 'SAVER {:>2}:'.format(id)
@@ -199,18 +199,7 @@ def filesystem_worker(
             )
 
         if verbose:
-            print('{}: adding security prices'.format(hdr))
-
-        candles = qs.get_candlesticks(
-            ticker,
-            df_to_save.open_time.min()-timedelta(minutes=5),
-            df_to_save.open_time.max(),
-            'FiveMinutes'
-        )
-        prices_df = pd.DataFrame(
-            data=[c['open'] for c in candles],
-            index=pd.to_datetime([c['end'] for c in candles]),
-        )
+            print('{} adding security prices'.format(hdr))
 
         df_to_save['stock_price'] = prices_df.loc[
             df_to_save.open_time].values[:, 0]
@@ -295,6 +284,8 @@ def collect_spreads(
     working_q = multiprocessing.Queue()
 
     if options_df is None:
+        if verbose:
+            print('Loading options')
         options_df = utils.load_options(ticker, expiry)
 
     # Get the expiry in seconds from epoch
@@ -310,8 +301,21 @@ def collect_spreads(
     # Get the epxiry as a UTC timedelta
     epoch_expiry = expiry_dt - epoch
 
-    # Needed by the saving threads to add security prices to the DataFrame
+    # Get the full set of prices that occured during this dataframe
+    if verbose:
+        print('Collecting security prices')
+    all_times = options_df.index.get_level_values(level=0)
     qs = QuestradeSecurities()
+    candles = qs.get_candlesticks(
+        ticker,
+        str(all_times[0]-timedelta(minutes=5)),
+        str(all_times[-1]),
+        'FiveMinutes'
+    )
+    prices_df = pd.DataFrame(
+        data=[c['open'] for c in candles],
+        index=pd.to_datetime([c['end'] for c in candles]),
+    )
 
     for o in ('C', 'P'):
         if verbose:
@@ -357,9 +361,9 @@ def collect_spreads(
                           ticker,
                           epoch,
                           epoch_expiry,
+                          prices_df,
                           max_spreads_per_file,
                           o,
-                          qs,
                           verbose,)
                 )
                 p.start()
