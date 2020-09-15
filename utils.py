@@ -92,9 +92,7 @@ def load_spreads(
 
     return speads_df
 
-def get_predictions(ticker, viable_spreads, max_margin=np.inf, min_profit = 0):
-    viable_spreads = sort_trades_df_columns(viable_spreads)
-
+def load_best_model(ticker, max_margin=np.inf, min_profit = 0):
     # Find the model related to these values which has the lowest loss
     model_dir = os.path.join(config.ML_MODELS_DIR, ticker)
     best_model_tarball = None
@@ -128,6 +126,24 @@ def get_predictions(ticker, viable_spreads, max_margin=np.inf, min_profit = 0):
         means = pd.read_pickle(os.path.join(tmpdir, 'means'))
         stds = pd.read_pickle(os.path.join(tmpdir, 'stds'))
 
+    return {'model': model, 'means': means, 'stds': stds}
+
+def get_predictions(
+    viable_spreads,
+    options_model=None,
+    ticker=None,
+    max_margin=np.inf,
+    min_profit=0
+):
+    viable_spreads = sort_trades_df_columns(viable_spreads)
+
+    if options_model is None:
+        options_model = load_best_model(ticker, max_margin=np.inf, min_profit=0)
+
+    model = options_model['model']
+    means = options_model['means']
+    stds = options_model['stds']
+
     # We need to compile to continue
     model.compile(
         loss=keras.losses.BinaryCrossentropy(from_logits=True))
@@ -140,8 +156,8 @@ def get_predictions(ticker, viable_spreads, max_margin=np.inf, min_profit = 0):
             examples = examples.drop(col, axis=1)
 
     # Make sure we have the right columns in the right order
-    means = means[examples.columns]
-    stds = stds[examples.columns]
+    means = means[examples_columns]
+    stds = stds[examples_columns]
 
     # Normalize
     examples = (examples - means) / stds
