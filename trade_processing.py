@@ -235,7 +235,7 @@ def filesystem_worker(
     while True:
         # Grab a strike for the leg we will be longing
         try:
-            spread_df = input_q.get(timeout=5)
+            spread_df = input_q.get(timeout=10)
         except queue.Empty:
             break
 
@@ -265,11 +265,11 @@ def collect_spreads(
     expiry,
     options_df=None,
     vertical=True,
-    getter_procs=2,
+    getter_procs=5,
     saver_procs=5,
     max_margin=config.MARGIN,
     get_max_profit=False,
-    max_spreads_per_file=50000,
+    max_spreads_per_file=25000,
     verbose=False,
     debug=False
 ):
