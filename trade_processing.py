@@ -263,7 +263,7 @@ def filesystem_worker(
 def collect_spreads(
     ticker,
     expiry,
-    options_df=None,
+    options_df,
     vertical=True,
     getter_procs=5,
     saver_procs=5,
@@ -282,11 +282,6 @@ def collect_spreads(
 
     # And the threads will put their resulting DataFrames into this queue
     working_q = multiprocessing.Queue()
-
-    if options_df is None:
-        if verbose:
-            print('Loading options')
-        options_df = utils.load_options(ticker, expiry)
 
     # Get the expiry in seconds from epoch
     epoch = datetime(1970, 1, 1, 0, 0, 0, tzinfo=timezone.utc)

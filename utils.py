@@ -49,14 +49,18 @@ def load_spreads(
     ticker,
     expiry,
     options_df=None,
+    get_max_profit=True,
     refresh=False,
     save=True,
     verbose=False
 ):
+    # If we were provided options, it means these are what we should be parsing
+    # instead of attempting to load existing spreads from file
     if options_df is None:
-        filepath = os.path.join(
-            config.ML_DATA_DIR, '{}_{}_spreads.bz2'.format(ticker, expiry))
+        # Do we want to load the spreads from scratch?
         if not refresh:
+            filepath = os.path.join(
+                config.ML_DATA_DIR, '{}_{}_spreads.bz2'.format(ticker, expiry))
             if verbose:
                 print('Attempting to load saved spreads')
             try:
@@ -67,13 +71,18 @@ def load_spreads(
                 if verbose:
                     print('No spreads saved.')
 
+        if verbose:
+            print('Loading options')
+
+        options_df = load_options(ticker, expiry)
+
     if verbose:
         print('Building spreads.')
 
     speads_df = tp.collect_spreads(ticker,
                                    expiry,
-                                   options_df=options_df,
-                                   get_max_profit=True,
+                                   options_df,
+                                   get_max_profit=get_max_profit,
                                    verbose=verbose)
     if save:
         # Save these so that we don't have to reload them next time
