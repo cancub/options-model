@@ -150,10 +150,13 @@ def get_predictions(
 
     # Maybe we got the margin or profits in with the spreads. These were not
     # provided to the model and so they must be removed
-    examples = viable_spreads
+    examples_columns = viable_spreads.columns.to_list()
     for col in ('open_margin', 'max_profit'):
-        if col in examples.columns:
-            examples = examples.drop(col, axis=1)
+        try:
+            examples_columns.remove(col)
+        except ValueError:
+            pass
+    examples = viable_spreads[examples_columns]
 
     # Make sure we have the right columns in the right order
     means = means[examples_columns]
