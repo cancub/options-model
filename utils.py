@@ -26,12 +26,8 @@ def get_basic_datetimes(times_strings):
     )))
 
 def get_last_backup_path():
-    return os.path.join(
-        config.BACKUPS_DIR,
-        sorted(
-            (b for b in os.listdir(config.BACKUPS_DIR) if b.endswith('.tar'))
-        )[-1]
-    )
+    fnames = (b for b in os.listdir(config.BACKUPS_DIR) if b.endswith('.tar'))
+    return os.path.abspath(os.path.join(config.BACKUPS_DIR, sorted(fnames)[-1]))
 
 def load_options(ticker, expiry=None):
     # Determine the last backup file
