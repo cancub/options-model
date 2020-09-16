@@ -4,6 +4,7 @@ import json
 import numpy as np
 import os
 import pandas as pd
+import random
 import re
 import shutil
 import subprocess as sp
@@ -106,14 +107,19 @@ def load_spreads(
 
     return spreads_dir
 
-def spreads_dirs_to_generator(spreads_dirs):
+def spreads_dirs_to_generator(spreads_dirs, shuffle=True):
     # First we need to get a list of all of the files to be loaded
+    paths = []
     for d in spreads_dirs:
         if not os.path.exists(d):
             print('{} does not exist. Skipping.'.format(d))
             continue
         for f in os.listdir(d):
-            yield pd.read_pickle(os.path.join(d, f))
+            paths.append(os.path.join(d, f))
+    if shuffle:
+        random.shuffle(paths)
+    for p in paths:
+        yield pd.read_pickle(p)
 
 def load_best_model(ticker, max_margin=np.inf, min_profit = 0):
     # Find the model related to these values which has the lowest loss
