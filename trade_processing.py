@@ -1,4 +1,3 @@
-from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import multiprocessing
 import numpy as np
@@ -12,7 +11,6 @@ import uuid
 from questrade_helpers import QuestradeSecurities
 
 import config
-import utils
 
 def collect_TA(ticker, dates):
     # return the technical analysis portion for the ticker to be used in the
@@ -316,10 +314,6 @@ def collect_spreads(
         if verbose:
             print('Working on spreads based on ' + o)
 
-        # Make sure there's a sub directory for this specific option type
-        type_subdir = os.path.join(tmpdir, o)
-        os.mkdir(type_subdir)
-
         # These three DataFrames are used over and over by all of the workers.
         option_type_df = options_df.xs(o, level=1)
         bid_df = option_type_df['bidPrice'].unstack(level=[1])
@@ -352,7 +346,7 @@ def collect_spreads(
                     target=filesystem_worker,
                     args=(i,
                           working_q,
-                          type_subdir,
+                          tmpdir,
                           ticker,
                           epoch,
                           epoch_expiry,
