@@ -92,6 +92,15 @@ def load_spreads(
 
     return speads_df
 
+def spreads_dirs_to_generator(spreads_dirs):
+    # First we need to get a list of all of the files to be loaded
+    for d in spreads_dirs:
+        if not os.path.exists(d):
+            print('{} does not exist. Skipping.'.format(d))
+            continue
+        for f in os.listdir(d):
+            yield pd.read_pickle(os.path.join(d, f))
+
 def load_best_model(ticker, max_margin=np.inf, min_profit = 0):
     # Find the model related to these values which has the lowest loss
     model_dir = os.path.join(config.ML_MODELS_DIR, ticker)
