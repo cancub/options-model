@@ -217,11 +217,6 @@ def filesystem_worker(
             (epoch_expiry - epoch_opens).apply(lambda x: x.total_seconds())//60
         )
 
-        # Show the true values of the trade
-        to_centify = ['open_margin', 'max_profit']
-        for col in (c for c in to_centify if c in df_to_save.columns):
-            df_to_save[col] *= 100
-
         filepath = os.path.join(working_dir, str(uuid.uuid4()))
         if verbose:
             print('{} saving to {}'.format(hdr, filepath))
