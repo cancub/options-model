@@ -232,25 +232,33 @@ def sort_trades_df_columns(trades_df):
 
     return trades_df[meta_cols]
 
+def collect_statistics(trades_df):
+    trades_means = trades_df.mean()
+    trades_vars = trades_df.var()
+
+    # Some columns should not be normalized
+    static_columns = ['open_margin', 'max_profit']
+    for i in range(1, 5):
+        type_col = 'leg{}_type'.format(i)
+        if type_col in trades_df.columns:
+            static_columns.append(type_col)
+
+    for c in static_columns:
+        try:
+            trades_means[c] = 0
+            trades_vars[c] = 1
+        except KeyError:
+            pass
+
+    return trades_means, trades_vars
+
 def normalize_metadata_columns(trades_df):
     # We must not normalize the leg types since these columns are categorical.
     # So we give these specific columns mean 0 std 1 to make them unchanged
     # after the normalization operation
-    meta_means = trades_df.mean()
-    meta_stds = trades_df.std()
+    meta_means, meta_vars = collect_statistics(trades_df)
 
-    for i in range(1, 5):
-        type_str = 'leg{}_type'.format(i)
-        if type_str not in trades_df.columns:
-            break
-        meta_means[type_str] = 0
-        meta_stds[type_str] = 1
-
-    # Also ignore the selection data
-    meta_means.open_margin = 0
-    meta_means.max_profit = 0
-    meta_stds.open_margin = 1
-    meta_stds.max_profit = 1
+    meta_stds = meta_vars.pow(1/2)
 
     normalized_df = (trades_df - meta_means) / meta_stds
 
