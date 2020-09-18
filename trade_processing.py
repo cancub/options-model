@@ -37,6 +37,7 @@ def spread_worker(
     output_q,
     get_max_profit=False,
     max_margin=config.MARGIN,
+    ignore_loss=config.IGNORE_LOSS,
     verbose=False
 ):
     '''
@@ -97,6 +98,8 @@ def spread_worker(
             max_profits = open_credits + close_credits
             max_profits = max_profits.stack(level=0, dropna=False)
             leg1_df = pd.concat((open_margins, max_profits), axis=1)
+            # Don't bother with trades we won't be using for training
+            leg1_df = leg1_df[leg1_df[1] > ignore_loss]
 
         # Strip out the trades that we can't actually open (i.e., one or both
         # sides weren't there or the combination was too pricey)
@@ -261,6 +264,7 @@ def collect_spreads(
     getter_procs=5,
     saver_procs=5,
     max_margin=config.MARGIN,
+    ignore_loss=config.IGNORE_LOSS,
     get_max_profit=False,
     max_spreads_per_file=25000,
     verbose=False,
@@ -331,6 +335,7 @@ def collect_spreads(
                           working_q,
                           get_max_profit,
                           max_margin,
+                          ignore_loss,
                           verbose,)
                 )
                 p.start()

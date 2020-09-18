@@ -18,4 +18,7 @@ QUIET           = True
 
 # Maximum amount of margin we are allowed to use for trades
 # NOTE: this is /100 because of the scale of options pricing
-MARGIN          = 60
+MARGIN          = 20
+
+# We're not going to be using this data for training in any case
+IGNORE_LOSS     = 0
