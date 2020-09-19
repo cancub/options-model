@@ -37,7 +37,6 @@ def spread_worker(
     output_q,
     get_max_profit=False,
     max_margin=config.MARGIN,
-    ignore_loss=config.IGNORE_LOSS,
     verbose=False
 ):
     '''
@@ -98,8 +97,6 @@ def spread_worker(
             max_profits = open_credits + close_credits
             max_profits = max_profits.stack(level=0, dropna=False)
             leg1_df = pd.concat((open_margins, max_profits), axis=1)
-            # Don't bother with trades we won't be using for training
-            leg1_df = leg1_df[leg1_df[1] > ignore_loss]
 
         # Strip out the trades that we can't actually open (i.e., one or both
         # sides weren't there or the combination was too pricey)
@@ -178,16 +175,20 @@ def filesystem_worker(
     verbose=False,
 ):
     hdr = 'SAVER {:>2}:'.format(id)
-    trades_in_memory = 0
     spread_list      = []
     def save_piece():
-
-        if verbose:
-            print('{} saving {} spreads'.format(hdr, trades_in_memory))
-
         # Get ready to save by building the start of the DataFrame
         df_to_save = pd.concat(spread_list)
 
+        if ignore_loss is not None:
+            # Don't bother with trades we won't be using for training
+            df_to_save = df_to_save[df_to_save[1] > ignore_loss]
+
+        # Update the count
+        trades_in_memory = df_to_save.shape[0]
+
+        if verbose:
+            print('{} saving {} spreads'.format(hdr, trades_in_memory))
         # Add in a column showing which option type was in use for each leg.
         # Use the values of 1 and -1 to that 0 can be used to signify an empty
         # leg when working with the model
@@ -228,6 +229,7 @@ def filesystem_worker(
     if verbose:
         print('{} START'.format(hdr))
 
+    trades_in_memory = 0
     while True:
         # Grab a strike for the leg we will be longing
         try:
@@ -243,6 +245,9 @@ def filesystem_worker(
         # continue
         if trades_in_memory < max_spreads:
             continue
+
+        if verbose:
+            print('{} processing {} spreads'.format(hdr, trades_in_memory))
 
         save_piece()
 
