@@ -17,15 +17,6 @@ def collect_TA(ticker, dates):
     # final input vector
     pass
 
-# TODO:
-# check how to find vega
-
-def get_stock_prices(ticker, working_dir='pickles'):
-    # Get the prices time series for the underlying security of this ticker
-    all_stock_prices = pd.read_pickle(os.path.join(working_dir, 'price'))
-    stock_dtimes = utils.get_basic_datetimes(all_stock_prices['datetime'])
-    return all_stock_prices['ticker'].set_index(stock_dtimes, inplace=True)
-
 # ============================== Vertical spreads ==============================
 
 def spread_worker(
