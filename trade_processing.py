@@ -167,6 +167,8 @@ def filesystem_worker(
     prices_df,
     max_spreads,
     option_type,
+    winning_profit=None,
+    loss_win_ratio=None,
     verbose=False,
 ):
     hdr = 'SAVER {:>2}:'.format(id)
@@ -175,6 +177,20 @@ def filesystem_worker(
         # Get ready to save by building the start of the DataFrame
         df_to_save = pd.concat(spread_list)
 
+        if winning_profit is not None and loss_win_ratio is not None:
+            # Determine the max profits when purchasing one of these trades
+            losers = df_to_save[df_to_save.max_profit < winning_profit]
+            winners = df_to_save[df_to_save.max_profit >= winning_profit]
+            total_winners = winners.shape[0]
+
+            # Get at most the desired ratio of losers to winners, using the losers that
+            # were closest to profit
+            losers_to_get = total_winners * loss_win_ratio
+
+            df_to_save = pd.concat((
+                winners,
+                losers.sort_values(by='max_profit', ascending=False)[:losers_to_get]
+            ))
         if ignore_loss is not None:
             # Don't bother with trades we won't be using for training
             df_to_save = df_to_save[df_to_save[1] > ignore_loss]
@@ -265,6 +281,8 @@ def collect_spreads(
     saver_procs=5,
     max_margin=config.MARGIN,
     ignore_loss=config.IGNORE_LOSS,
+    winning_profit=None,
+    loss_win_ratio=None,
     max_spreads_per_file=25000,
     verbose=False,
     debug=False
@@ -351,6 +369,8 @@ def collect_spreads(
                           prices_df,
                           max_spreads_per_file,
                           o,
+                          winning_profit,
+                          loss_win_ratio,
                           verbose,)
                 )
                 p.start()
