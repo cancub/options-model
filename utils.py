@@ -103,19 +103,19 @@ def extract_and_get_file_list(tarball_path, output_dir):
         ['tar', '-C', output_dir, '-xvf', tarball_path])
     return sorted(files_bytes.decode('utf-8').strip().split('\n'))
 
-def spreads_dirs_to_generator(spreads_dirs, shuffle=True):
+def spreads_tarballs_to_generator(tarball_paths, shuffle=True):
     # First we need to get a list of all of the files to be loaded
-    paths = []
-    for d in spreads_dirs:
-        if not os.path.exists(d):
-            print('{} does not exist. Skipping.'.format(d))
-            continue
-        for f in os.listdir(d):
-            paths.append(os.path.join(d, f))
-    if shuffle:
-        random.shuffle(paths)
-    for p in paths:
-        yield sort_trades_df_columns(pd.read_pickle(p))
+    if not isinstance(tarball_paths, list):
+        tarball_paths = [tarball_paths]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        paths = []
+        for p in tarball_paths:
+            file_list = extract_and_get_file_list(p, tmpdir)
+            paths += [os.path.join(tmpdir, f) for f in file_list]
+        if shuffle:
+            random.shuffle(paths)
+        for p in paths:
+            yield sort_trades_df_columns(pd.read_pickle(p))
 
 def load_best_model(ticker, max_margin=np.inf, min_profit = 0):
     # Find the model related to these values which has the lowest loss
