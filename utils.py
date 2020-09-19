@@ -6,7 +6,7 @@ import pandas as pd
 import random
 import re
 import shutil
-import subprocess as sp
+import subprocess
 import tarfile
 import tempfile
 
@@ -43,34 +43,29 @@ def load_options(ticker, expiry=None):
 def load_spreads(
     ticker,
     expiry,
-    options_df=None,
     winning_profit=None,
     loss_win_ratio=None,
     refresh=False,
-    save=True,
     verbose=False
 ):
     ticker_dir = os.path.join(config.ML_DATA_DIR, ticker)
-    spreads_dir = os.path.join(ticker_dir, expiry)
+    spreads_path = os.path.join(ticker_dir, '{}.tar'.format(expiry))
 
-    # If we were provided options, it means these are what we should be parsing
-    # instead of attempting to load existing spreads from file
-    if options_df is None:
-        # Do we want to load the spreads from scratch?
-        if not refresh:
-            if verbose:
-                print('Attempting to locate saved spreads')
-            if os.path.exists(spreads_dir):
-                if verbose:
-                    print('Saved spreads located.')
-                return spreads_dir
-            if verbose:
-                print('No spreads saved.')
-
+    # Do we want to load the spreads from scratch?
+    if not refresh:
         if verbose:
-            print('Loading options')
+            print('Attempting to locate saved spreads')
+        if os.path.exists(spreads_path):
+            if verbose:
+                print('Saved spreads located.')
+            return spreads_path
+        if verbose:
+            print('No spreads saved.')
 
-        options_df = load_options(ticker, expiry)
+    if verbose:
+        print('Loading options')
+
+    options_df = load_options(ticker, expiry)
 
     if verbose:
         print('Building spreads.')
@@ -81,26 +76,24 @@ def load_spreads(
                                  winning_profit=winning_profit,
                                  loss_win_ratio=loss_win_ratio,
                                  verbose=verbose)
-    if save:
-        # Save these so that we don't have to reload them next time
-        if os.path.exists(spreads_dir):
-            if verbose:
-                print('Removing previously-saved spreads.')
-            shutil.rmtree(spreads_dir)
 
+    # Save these so that we don't have to reload them next time
+    if verbose:
+        print('Adding spreads to datastore.')
+
+    if not os.path.exists(ticker_dir):
         if verbose:
-            print('Adding spreads to datastore.')
+            print('Creating ticker directory {}.'.format(ticker_dir))
+        os.makedirs(ticker_dir)
 
-        if not os.path.exists(ticker_dir):
-            if verbose:
-                print('Creating ticker directory {}.'.format(ticker_dir))
-            os.makedirs(ticker_dir)
+    # Package it into a tarball
+    subprocess.check_call(
+        ['tar', '-C', out_dir, '-cf', spreads_path] + os.listdir(out_dir))
 
-        os.rename(out_dir, spreads_dir)
-    else:
-        spreads_dir = out_dir
+    shutil.rmtree(out_dir)
 
-    return spreads_dir
+    return spreads_path
+
 
 def spreads_dirs_to_generator(spreads_dirs, shuffle=True):
     # First we need to get a list of all of the files to be loaded
