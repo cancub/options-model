@@ -151,7 +151,7 @@ def load_best_model(ticker, max_margin=np.inf, min_profit = 0):
 
         # Load the stats
         means = pd.read_pickle(os.path.join(tmpdir, 'means'))
-        stds = pd.read_pickle(os.path.join(tmpdir, 'stds'))
+        stds = pd.read_pickle(os.path.join(tmpdir, 'vars')).pow(1/2)
 
     return {'model': model, 'means': means, 'stds': stds}
 
