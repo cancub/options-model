@@ -279,7 +279,7 @@ def collect_winners_and_hard_losers(trades_df,
     profit_less_fees = trades_df.max_profit - calculate_fee()
 
     losers = trades_df[profit_less_fees < winning_profit]
-    winners = trades_df[profit_less_fees >= 0]
+    winners = trades_df[profit_less_fees >= winning_profit]
     total_winners = len(winners)
     total_losers = len(losers)
 
