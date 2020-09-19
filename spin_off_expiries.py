@@ -11,10 +11,14 @@ import utils
 NOW = datetime.now().date()
 backup_path = utils.get_last_backup_path()
 
+# Only make a new tarball if we've actually pulled out some expiries
+expiries_popped = False
+
 with tempfile.TemporaryDirectory() as tmpdir:
     files = utils.extract_and_get_file_list(backup_path, tmpdir)
 
     for f in files:
+        expiries_popped_for_ticker = False
         ticker = os.path.splitext(f)[0]
         # Load the DataFrame
         df_path = os.path.join(tmpdir, f)
@@ -34,28 +38,46 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
         before_df = df[old]
 
-        if len(before_df) > 0:
-            ticker_dir = os.path.join(config.EXPIRIES_DIR, ticker)
-            try:
-                os.makedirs(ticker_dir)
-            except OSError as e:
-                if e.errno != errno.EEXIST:
-                    raise
+        if len(before_df) == 0:
+            continue
 
-            # Walk through the old expiries and save them in their own pickles
-            for old_exp in before_df.index.unique(level=1).values:
-                # It might be that we've picked up data for an expiry that has
-                # already passed. Just ignore these cases and let the data die
-                exp_path = os.path.join(ticker_dir, '{}.bz2'.format(old_exp))
-                if os.path.exists(exp_path):
-                    continue
-                exp_df = before_df.xs(old_exp, level=1, drop_level=False)
-                exp_df.to_pickle()
+        # Okay, we know we're spinning off some expiries here
+        ticker_dir = os.path.join(config.EXPIRIES_DIR, ticker)
+        try:
+            os.makedirs(ticker_dir)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
 
-        # Re-add the remaining, unexpired data to the backup to be saved once
-        # more
-        df[new].to_pickle(df_path)
+        import pdb; pdb.set_trace()
+        # Walk through the old expiries and save them in their own pickles
+        for old_exp in before_df.index.unique(level=1).values:
+            # It might be that we've picked up data for an expiry that has
+            # already passed. Just ignore these cases and let the data die
+            exp_path = os.path.join(ticker_dir, '{}.bz2'.format(old_exp))
+            if os.path.exists(exp_path):
+                continue
 
-    # Make the all-unexpired backup
-    subprocess.check_call(
-        ['tar', '-C', tmpdir, '-cf', backup_path + '.tmp'] + files)
+            # We're actually going to remove something from this tarball, so we
+            # need to signal that the old tarball must be replaced
+            expiries_popped = True
+
+            # Similarly we need to signal that this particular ticker needs to
+            # be overwritten for the new tarball
+            expiries_popped_for_ticker = True
+
+            exp_df = before_df.xs(old_exp, level=1, drop_level=False)
+            exp_df.to_pickle(exp_path)
+
+        if expiries_popped_for_ticker:
+            # Re-add the remaining, unexpired data to the backup to be saved
+            # once more
+            df[new].to_pickle(df_path)
+
+    if expiries_popped:
+        tmp_path = backup_path + '.tmp'
+        # Make the all-unexpired backup
+        subprocess.check_call(['tar', '-C', tmpdir, '-cf', tmp_path] + files)
+
+        # And now overwrite the old backup
+        os.rename(tmp_path, backup_path)
