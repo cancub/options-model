@@ -2,6 +2,7 @@ import os
 
 STORAGE_DIR     = 'pickles'
 BACKUPS_DIR     = 'backups'
+EXPIRIES_DIR    = 'expiries'
 TRADES_DIR      = 'trades'
 ML_DIR          = 'learning'
 ML_DATA_DIR     = os.path.join(ML_DIR, 'data')
