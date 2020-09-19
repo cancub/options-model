@@ -22,21 +22,25 @@ def get_last_backup_path():
     return os.path.abspath(os.path.join(config.BACKUPS_DIR, sorted(fnames)[-1]))
 
 def load_options(ticker, expiry=None):
-    # Determine the last backup file
-    last_backup = get_last_backup_path()
+    # First try to load one of the expiry files
+    try:
+        df = pd.read_pickle(
+            os.path.join(config.EXPIRIES_DIR, ticker, '{}.bz2'.format(expiry)))
+    except FileNotFoundError:
+        # Nope, not there (probably looking ahead to future expiries). So now we
+        # need to open up the last backup file
+        last_backup = get_last_backup_path()
 
-    # Retrieve the pickle from the backup
-    df = pd.read_pickle(
-        BytesIO(
-            subprocess.check_output(
-                ['tar', '-xOf', last_backup, ticker + '.bz2'])
-        ),
-        compression='bz2'
-    )
+        # Retrieve the pickle from the backup
+        df = pd.read_pickle(
+            BytesIO(
+                subprocess.check_output(
+                    ['tar', '-xOf', last_backup, ticker + '.bz2'])
+            ),
+            compression='bz2'
+        )
 
-    # Select the expiry if specified
-    if expiry is not None:
-        df = df.xs(expiry, level=1)
+    df = df.xs(expiry, level=1)
 
     return df
 
