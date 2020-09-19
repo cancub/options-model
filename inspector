@@ -1,4 +1,4 @@
-#! /home/alfred/anaconda3/bin/python
+#! /usr/bin/env python
 import argparse
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
