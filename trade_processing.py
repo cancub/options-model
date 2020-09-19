@@ -169,6 +169,7 @@ def filesystem_worker(
     option_type,
     winning_profit=None,
     loss_win_ratio=None,
+    ignore_loss=None,
     verbose=False,
 ):
     hdr = 'SAVER {:>2}:'.format(id)
@@ -280,7 +281,7 @@ def collect_spreads(
     getter_procs=5,
     saver_procs=5,
     max_margin=config.MARGIN,
-    ignore_loss=config.IGNORE_LOSS,
+    ignore_loss=None,
     winning_profit=None,
     loss_win_ratio=None,
     max_spreads_per_file=25000,
@@ -351,7 +352,6 @@ def collect_spreads(
                           buy_strikes_q,
                           working_q,
                           max_margin,
-                          ignore_loss,
                           verbose,)
                 )
                 p.start()
@@ -371,6 +371,7 @@ def collect_spreads(
                           o,
                           winning_profit,
                           loss_win_ratio,
+                          ignore_loss,
                           verbose,)
                 )
                 p.start()
