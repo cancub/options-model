@@ -154,13 +154,12 @@ def load_best_model(ticker, max_margin=np.inf, min_profit = 0):
 
         with open(os.path.join(tmpdir, 'metadata'), 'r') as MF:
             metadata = json.load(MF)
-        feature_order = metadata['feature_order']
 
     return {
         'model': model,
         'means': means,
         'stds': stds,
-        'feature_order': feature_order
+        'metadata': metadata
     }
 
 def get_predictions(
@@ -177,7 +176,7 @@ def get_predictions(
     model = options_model['model']
     means = options_model['means']
     stds = options_model['stds']
-    columns_order = options_model['feature_order']
+    columns_order = options_model['metadata']['feature_order']
 
     # We need to compile to continue
     model.compile(
