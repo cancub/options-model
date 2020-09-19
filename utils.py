@@ -51,7 +51,6 @@ def load_spreads(
     ticker,
     expiry,
     options_df=None,
-    get_max_profit=True,
     refresh=False,
     save=True,
     verbose=False
@@ -84,7 +83,6 @@ def load_spreads(
     out_dir = tp.collect_spreads(ticker,
                                  expiry,
                                  options_df,
-                                 get_max_profit=get_max_profit,
                                  verbose=verbose)
     if save:
         # Save these so that we don't have to reload them next time

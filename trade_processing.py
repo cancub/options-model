@@ -35,7 +35,6 @@ def spread_worker(
     ask_df,
     buy_strikes_q,
     output_q,
-    get_max_profit=False,
     max_margin=config.MARGIN,
     verbose=False
 ):
@@ -73,30 +72,26 @@ def spread_worker(
         open_margins[open_margins > max_margin] = np.nan
         open_margins = open_margins.stack(level=0, dropna=False)
 
-        if not get_max_profit:
-            # Looks like the strikes, opens, and margins are all we need
-            leg1_df = open_margins.to_frame()
-        else:
-            # Do some magic to get the maximum profits
-            open_credits = bid_df.sub(leg1_asks, axis='rows')
-            close_credits = (-bid_df).add(leg1_bids, axis='rows')
+        # Do some magic to get the maximum profits
+        open_credits = bid_df.sub(leg1_asks, axis='rows')
+        close_credits = (-bid_df).add(leg1_bids, axis='rows')
 
-            for leg2_strike in close_credits.columns:
-                # Get the forward-looking maximum by reversing the values,
-                # applying a cumulative fmax (to ignore NaN), then flipping the
-                # result
-                #       1, NaN,   2,   1,   5,   0
-                #       0,   5,   1,   2, NaN,   1   (flip)
-                #       0,   5,   5,   5,   5,   5   (cummax)
-                #       5,   5,   5,   5,   5,   0   (flip)
-                reverse_closes = np.flip(
-                    close_credits[leg2_strike].values)
-                close_credits[leg2_strike] = np.flip(
-                    np.fmax.accumulate(reverse_closes))
+        for leg2_strike in close_credits.columns:
+            # Get the forward-looking maximum by reversing the values,
+            # applying a cumulative fmax (to ignore NaN), then flipping the
+            # result
+            #       1, NaN,   2,   1,   5,   0
+            #       0,   5,   1,   2, NaN,   1   (flip)
+            #       0,   5,   5,   5,   5,   5   (cummax)
+            #       5,   5,   5,   5,   5,   0   (flip)
+            reverse_closes = np.flip(
+                close_credits[leg2_strike].values)
+            close_credits[leg2_strike] = np.flip(
+                np.fmax.accumulate(reverse_closes))
 
-            max_profits = open_credits + close_credits
-            max_profits = max_profits.stack(level=0, dropna=False)
-            leg1_df = pd.concat((open_margins, max_profits), axis=1)
+        max_profits = open_credits + close_credits
+        max_profits = max_profits.stack(level=0, dropna=False)
+        leg1_df = pd.concat((open_margins, max_profits), axis=1)
 
         # Strip out the trades that we can't actually open (i.e., one or both
         # sides weren't there or the combination was too pricey)
@@ -117,9 +112,8 @@ def spread_worker(
             'datetime': 'open_time',
             'strike': 'leg2_strike',
             0: 'open_margin',
+            1: 'max_profit'
         }
-        if get_max_profit:
-            rename_dict[1] = 'max_profit'
         leg1_df = leg1_df.rename(columns=rename_dict)
 
         # Add in the leg 1 strike
@@ -270,7 +264,6 @@ def collect_spreads(
     saver_procs=5,
     max_margin=config.MARGIN,
     ignore_loss=config.IGNORE_LOSS,
-    get_max_profit=False,
     max_spreads_per_file=25000,
     verbose=False,
     debug=False
@@ -338,7 +331,6 @@ def collect_spreads(
                           ask_df,
                           buy_strikes_q,
                           working_q,
-                          get_max_profit,
                           max_margin,
                           ignore_loss,
                           verbose,)
@@ -374,7 +366,6 @@ def collect_spreads(
                 ask_df,
                 buy_strikes_q,
                 working_q,
-                get_max_profit,
                 max_margin,
                 verbose,
             )
