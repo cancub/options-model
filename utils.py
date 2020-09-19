@@ -276,7 +276,7 @@ def collect_winners_and_hard_losers(trades_df,
     total_trades = len(trades_df)
 
     # Determine the max profits when purchasing one of these trades
-    profit_less_fees = trades_df.max_profit - calculate_fee(1, both_sides=True)
+    profit_less_fees = trades_df.max_profit - calculate_fee()
 
     losers = trades_df[profit_less_fees < winning_profit]
     winners = trades_df[profit_less_fees >= 0]
@@ -303,4 +303,4 @@ def calculate_fee(count=1, both_sides=True):
     fee = BASE_FEE + count
     if both_sides:
         fee *= 2
-    return fee
+    return fee / 100
