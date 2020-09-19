@@ -35,7 +35,7 @@ def spread_worker(
     ask_df,
     buy_strikes_q,
     output_q,
-    max_margin=config.MARGIN,
+    max_margin=None,
     verbose=False
 ):
     '''
@@ -69,7 +69,8 @@ def spread_worker(
         open_margins = bid_df.add(leg1_asks, axis='rows')
 
         # Pretend that the too-expensive trades don't exist
-        open_margins[open_margins > max_margin] = np.nan
+        if max_margin is not None:
+            open_margins[open_margins > max_margin] = np.nan
         open_margins = open_margins.stack(level=0, dropna=False)
 
         # Do some magic to get the maximum profits
