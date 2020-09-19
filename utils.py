@@ -94,6 +94,10 @@ def load_spreads(
 
     return spreads_path
 
+def extract_and_get_file_list(tarball_path, output_dir):
+    files_bytes = subprocess.check_output(
+        ['tar', '-C', output_dir, '-xvf', tarball_path])
+    return sorted(files_bytes.decode('utf-8').strip().split('\n'))
 
 def spreads_dirs_to_generator(spreads_dirs, shuffle=True):
     # First we need to get a list of all of the files to be loaded
