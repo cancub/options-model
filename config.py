@@ -1,10 +1,10 @@
 import os
 
-STORAGE_DIR     = 'pickles'
-BACKUPS_DIR     = 'backups'
-EXPIRIES_DIR    = 'expiries'
-TRADES_DIR      = 'trades'
-ML_DIR          = 'learning'
+STORAGE_DIR     = os.path.abspath('./pickles')
+BACKUPS_DIR     = os.path.abspath('./backups')
+EXPIRIES_DIR    = os.path.abspath('./expiries')
+TRADES_DIR      = os.path.abspath('./trades')
+ML_DIR          = os.path.abspath('./learning')
 ML_DATA_DIR     = os.path.join(ML_DIR, 'data')
 ML_MODELS_DIR   = os.path.join(ML_DIR, 'models')
 
