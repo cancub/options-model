@@ -260,44 +260,40 @@ def collect_winners_and_hard_losers(trades_df,
                                     winning_profit=0,
                                     l_to_w_ratio=3):
 
-    total_trades = len(trades_df)
+    def get_and_print_wl(df):
+        total_trades = len(df)
 
-    # Determine the max profits when purchasing one of these trades
-    profit_less_fees = trades_df.max_profit - calculate_fee()
+        # Determine the max profits when purchasing one of these trades
+        profit_less_fees = df.max_profit - calculate_fee()
 
-    losers = trades_df[profit_less_fees < winning_profit]
-    winners = trades_df[profit_less_fees >= winning_profit]
-    total_winners = len(winners)
-    total_losers = len(losers)
+        losers = df[profit_less_fees < winning_profit]
+        winners = df[profit_less_fees >= winning_profit]
+        total_winners = len(winners)
+        total_losers = len(losers)
 
-    print(
-        'Before:\n{} ({:.1%}) winners\n{} ({:.1%}) losers\n'.format(
-            total_winners, total_winners / total_trades,
-            total_losers, total_losers / total_trades
+        print(
+            '{} ({:.1%}) winners\n{} ({:.1%}) losers\n'.format(
+                total_winners, total_winners / total_trades,
+                total_losers, total_losers / total_trades
+            )
         )
-    )
+
+        return winners, losers
+
+    print('Before')
+    winners, losers = get_and_print_wl(trades_df)
 
     # Get at most the desired ratio of losers to winners, using the losers that
     # were closest to profit
-    losers_to_get = total_winners * l_to_w_ratio
+    losers_to_get = winners.shape[0] * l_to_w_ratio
 
     return_df = pd.concat((
         winners,
         losers.sort_values(by='max_profit', ascending=False)[:losers_to_get]
     ))
 
-    losers = return_df[profit_less_fees < winning_profit]
-    winners = return_df[profit_less_fees >= winning_profit]
-    total_winners = len(winners)
-    total_losers = len(losers)
-
-    print(
-        'After:\n{} ({:.1%}) winners\n{} ({:.1%}) losers'.format(
-            total_winners, total_winners / total_trades,
-            total_losers, total_losers / total_trades
-        )
-    )
-
+    print('After')
+    get_and_print_wl(return_df)
     return return_df
 
 def calculate_fee(count=1, both_sides=True):
