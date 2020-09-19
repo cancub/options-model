@@ -121,7 +121,7 @@ def spreads_dirs_to_generator(spreads_dirs, shuffle=True):
     if shuffle:
         random.shuffle(paths)
     for p in paths:
-        yield pd.read_pickle(p)
+        yield sort_trades_df_columns(pd.read_pickle(p))
 
 def load_best_model(ticker, max_margin=np.inf, min_profit = 0):
     # Find the model related to these values which has the lowest loss
@@ -157,7 +157,16 @@ def load_best_model(ticker, max_margin=np.inf, min_profit = 0):
         means = pd.read_pickle(os.path.join(tmpdir, 'means'))
         stds = pd.read_pickle(os.path.join(tmpdir, 'vars')).pow(1/2)
 
-    return {'model': model, 'means': means, 'stds': stds}
+        with open(os.path.join(tmpdir, 'metadata'), 'r') as MF:
+            metadata = json.load(MF)
+        feature_order = metadata['feature_order']
+
+    return {
+        'model': model,
+        'means': means,
+        'stds': stds,
+        'feature_order': feature_order
+    }
 
 def get_predictions(
     viable_spreads,
@@ -166,7 +175,6 @@ def get_predictions(
     max_margin=np.inf,
     min_profit=0
 ):
-    viable_spreads = sort_trades_df_columns(viable_spreads)
 
     if options_model is None:
         options_model = load_best_model(ticker, max_margin=np.inf, min_profit=0)
@@ -174,6 +182,7 @@ def get_predictions(
     model = options_model['model']
     means = options_model['means']
     stds = options_model['stds']
+    columns_order = options_model['feature_order']
 
     # We need to compile to continue
     model.compile(
@@ -181,17 +190,11 @@ def get_predictions(
 
     # Maybe we got the margin or profits in with the spreads. These were not
     # provided to the model and so they must be removed
-    examples_columns = viable_spreads.columns.to_list()
-    for col in ('open_margin', 'max_profit'):
-        try:
-            examples_columns.remove(col)
-        except ValueError:
-            pass
-    examples = viable_spreads[examples_columns]
+    examples = viable_spreads[columns_order]
 
     # Make sure we have the right columns in the right order
-    means = means[examples_columns]
-    stds = stds[examples_columns]
+    means = means[columns_order]
+    stds = stds[columns_order]
 
     # Normalize
     examples = (examples - means) / stds
