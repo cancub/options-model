@@ -1,4 +1,3 @@
-import datetime as dt
 from   io import BytesIO
 import json
 import numpy as np
@@ -28,7 +27,10 @@ def load_options(ticker, expiry=None):
 
     # Retrieve the pickle from the backup
     df = pd.read_pickle(
-        BytesIO(sp.check_output(['tar', '-xOf', last_backup, ticker + '.bz2'])),
+        BytesIO(
+            subprocess.check_output(
+                ['tar', '-xOf', last_backup, ticker + '.bz2'])
+        ),
         compression='bz2'
     )
 
@@ -123,7 +125,8 @@ def load_best_model(ticker, max_margin=np.inf, min_profit = 0):
         fpath = os.path.join(model_dir, fname)
 
         # Get the metadata
-        meta = json.loads(sp.check_output(['tar', '-xOf', fpath, 'metadata']))
+        meta = json.loads(
+            subprocess.check_output(['tar', '-xOf', fpath, 'metadata']))
 
         # Check the criteria
         if (meta['max_margin'] < max_margin
