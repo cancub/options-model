@@ -284,7 +284,7 @@ def collect_winners_and_hard_losers(trades_df,
     total_losers = len(losers)
 
     print(
-        '{} ({:.1%}) winners\n{} ({:.1%}) losers'.format(
+        'Before:\n{} ({:.1%}) winners\n{} ({:.1%}) losers\n'.format(
             total_winners, total_winners / total_trades,
             total_losers, total_losers / total_trades
         )
@@ -294,10 +294,24 @@ def collect_winners_and_hard_losers(trades_df,
     # were closest to profit
     losers_to_get = total_winners * l_to_w_ratio
 
-    return pd.concat((
+    return_df = pd.concat((
         winners,
         losers.sort_values(by='max_profit', ascending=False)[:losers_to_get]
     ))
+
+    losers = return_df[profit_less_fees < winning_profit]
+    winners = return_df[profit_less_fees >= winning_profit]
+    total_winners = len(winners)
+    total_losers = len(losers)
+
+    print(
+        'After:\n{} ({:.1%}) winners\n{} ({:.1%}) losers'.format(
+            total_winners, total_winners / total_trades,
+            total_losers, total_losers / total_trades
+        )
+    )
+
+    return return_df
 
 def calculate_fee(count=1, both_sides=True):
     fee = BASE_FEE + count
