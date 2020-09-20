@@ -12,6 +12,8 @@ from questrade_helpers import QuestradeSecurities
 
 import config
 
+DONE = 'finished'
+
 def collect_TA(ticker, dates):
     # return the technical analysis portion for the ticker to be used in the
     # final input vector
@@ -149,6 +151,10 @@ def call_put_spread_worker(
     if verbose:
         print('{} COMPLETE'.format(hdr))
 
+    # Signal to one of the filesystem workers that one of the spread workers is
+    # done
+    output_q.put(DONE)
+
 def filesystem_worker(
     id,
     input_q,
@@ -167,8 +173,12 @@ def filesystem_worker(
     hdr = 'SAVER {:>2}:'.format(id)
     spread_list      = []
     def save_piece():
+    def save_piece(spread_list):
         # Get ready to save by building the start of the DataFrame
         df_to_save = pd.concat(spread_list)
+
+        if verbose:
+            print('{} processing {} spreads'.format(hdr, df_to_save.shape[0]))
 
         if winning_profit is not None and loss_win_ratio is not None:
             # Determine the max profits when purchasing one of these trades
@@ -176,13 +186,14 @@ def filesystem_worker(
             winners = df_to_save[df_to_save.max_profit >= winning_profit]
             total_winners = winners.shape[0]
 
-            # Get at most the desired ratio of losers to winners, using the losers that
-            # were closest to profit
+            # Get at most the desired ratio of losers to winners, using the
+            # losers that were closest to profit
             losers_to_get = total_winners * loss_win_ratio
 
             df_to_save = pd.concat((
                 winners,
-                losers.sort_values(by='max_profit', ascending=False)[:losers_to_get]
+                losers.sort_values(
+                    by='max_profit', ascending=False)[:losers_to_get]
             ))
         if ignore_loss is not None:
             # Don't bother with trades we won't be using for training
@@ -251,38 +262,35 @@ def filesystem_worker(
         print('{} START'.format(hdr))
 
     trades_in_memory = 0
-    started = False
+    spread_list = []
     while True:
-        # Grab a strike for the leg we will be longing
-        try:
-            # Block until we get the very first element, after that, only wait
-            # one second, max. This allows us to quickly finish up but not be
-            # too impatient to start
-            spread_df = input_q.get(timeout=4 if started else None)
-            started = True
-        except queue.Empty:
+        # Grab a strike for the leg we will be longing.
+        item = input_q.get()
+
+        # Quit in response to a spread worker quitting
+        if isinstance(item, str) and item == DONE:
+            if verbose:
+                print('Got {} signal from other side. Quitting.'.format(DONE))
             break
 
-        trades_in_memory += spread_df.shape[0]
-        spread_list.append(spread_df)
+        # Add this DataFrame to the list and update the count
+        trades_in_memory += item.shape[0]
+        spread_list.append(item)
 
-        # Once we hit a critical mass of spreads, this triggers the generation
-        # of a new file into which we dump all of the loaded spreads and then
-        # continue
         if trades_in_memory < max_spreads:
             continue
 
-        if verbose:
-            print('{} processing {} spreads'.format(hdr, trades_in_memory))
-
-        save_piece()
+        # The buffer has hit critical mass, so dump it into a new file
+        save_piece(spread_list)
 
         # Reset the values and start filling up the buffer again
         spread_list = []
         trades_in_memory = 0
 
+    # We're quitting, but we still need to check if there's anything in the
+    # buffer to dump before quitting
     if trades_in_memory > 0:
-        save_piece()
+        save_piece(spread_list)
 
     if verbose:
         print('{} COMPLETE'.format(hdr))
@@ -291,8 +299,7 @@ def collect_spreads(
     ticker,
     expiry,
     options_df,
-    getter_procs=5,
-    saver_procs=5,
+    procs_pairs=5,
     max_margin=config.MARGIN,
     ignore_loss=None,
     winning_profit=None,
@@ -355,7 +362,7 @@ def collect_spreads(
 
         if not debug:
             processes = []
-            for i in range(getter_procs):
+            for i in range(procs_pairs):
                 p = multiprocessing.Process(
                     target=call_put_spread_worker,
                     args=(i,
@@ -370,7 +377,7 @@ def collect_spreads(
                 p.start()
                 processes.append(p)
 
-            for i in range(saver_procs):
+            for i in range(procs_pairs):
                 p = multiprocessing.Process(
                     target=filesystem_worker,
                     args=(i,
