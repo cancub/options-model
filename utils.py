@@ -255,7 +255,24 @@ def collect_statistics(trades_df):
 
     return set_standard_static_stats(trades_means, trades_vars)
 
-def get_pooled_stats(expiry_path):
+def pool_stats_from_stats_df(ticker):
+    stats_df = pd.read_pickle(os.path.join(
+        config.ML_DATA_DIR, ticker, 'stats'))
+
+    pools = stats_df.pop('pools')
+    samples = stats_df.pop('samples')
+
+    means = stats_df.xs('mean', level=1)
+    variances = stats_df.xs('variance', level=1)
+
+    new_means = means.multiply(samples, 0).sum() / samples.sum()
+    new_variances = variances.multiply(
+        samples-pools, 0).sum() / (samples.sum() - pools.sum())
+
+    # Ensure that some columns will not be normalized
+    return set_standard_static_stats(new_means, new_variances)
+
+def pool_stats_from_expiry(expiry_path):
 
     # Collect the statistics
     means = []
