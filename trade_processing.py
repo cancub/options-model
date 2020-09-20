@@ -41,7 +41,6 @@ def call_put_spread_worker(
             break
 
         leg1_asks = ask_df[leg1_strike]
-        leg1_bids = bid_df[leg1_strike]
 
         # Figure out how much margin we'd need for this trade
         open_margins = bid_df.add(leg1_asks, axis='rows')
@@ -51,29 +50,44 @@ def call_put_spread_worker(
             open_margins[open_margins > max_margin] = np.nan
         open_margins = open_margins.stack(level=0, dropna=False)
 
-        # Do some magic to get the maximum profits
+        # Do some magic to get the maximum profits. Open credits is simple:
+        # subtract the amount we pay for the first leg from the amount we
+        # receive from the second.
+        # NOTE: leave NaN in place to symbolize that this is not a viable trade.
+        #       these trades will be removed at the end.
         open_credits = bid_df.sub(leg1_asks, axis='rows')
-        close_credits = (-bid_df).add(leg1_bids, axis='rows')
 
-        for leg2_strike in close_credits.columns:
-            # Get the forward-looking maximum by reversing the values,
-            # applying a cumulative fmax (to ignore NaN), then flipping the
-            # result
-            #       1, NaN,   2,   1,   5,   0
-            #       0,   5,   1,   2, NaN,   1   (flip)
-            #       0,   5,   5,   5,   5,   5   (cummax)
-            #       5,   5,   5,   5,   5,   0   (flip)
-            reverse_closes = np.flip(
-                close_credits[leg2_strike].values)
-            close_credits[leg2_strike] = np.flip(
-                np.fmax.accumulate(reverse_closes))
+        # When looking at the close credits, make sure to replace NaN with 0 on
+        # the close sides, because NaN implies the trade was worthless. This is
+        # good for leg 2 (since we buy it back for nothing at this timepoint)
+        # and bad for leg 1 (since we can't sell it at this time point).
+        # NOTE: make this 0.01 for the leg 2 side since if we want to close
+        #       early, we'd actually need to sell it for something.
+        close_credits = (-bid_df.fillna(0.01)).add(
+                            bid_df[leg1_strike].fillna(0), axis='rows')
+
+        # Get the forward-looking maximum  profitby reversing the values,
+        # applying a cumulative maximum, then flipping the result
+        #       1,   0,   2,   1,   5,   0
+        #       0,   5,   1,   2,   0,   1   (flip)
+        #       0,   5,   5,   5,   5,   5   (cummax)
+        #       5,   5,   5,   5,   5,   0   (flip)
+        close_credits = pd.DataFrame(
+            data    = np.flip(
+                            np.maximum.accumulate(
+                                np.flip(close_credits.values))),
+            columns = close_credits.columns,
+            index   = close_credits.index
+        )
 
         max_profits = open_credits + close_credits
         max_profits = max_profits.stack(level=0, dropna=False)
         leg1_df = pd.concat((open_margins, max_profits), axis=1)
 
-        # Strip out the trades that we can't actually open (i.e., one or both
-        # sides weren't there or the combination was too pricey)
+        # Since we left the NaNs in place for the open credits, we can now strip
+        # out the trades that we can't actually open because of:
+        #   credits -> one or both sides weren't there to open, or
+        #   margin  -> the combination was too pricey
         leg1_df.dropna(inplace=True)
 
         # If there's nothing left, then we can just skip this leg 1 strike
