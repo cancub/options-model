@@ -206,8 +206,25 @@ def filesystem_worker(
         if verbose:
             print('{} adding security prices'.format(hdr))
 
-        df_to_save['stock_price'] = prices_df.loc[
-            df_to_save.open_time].values[:, 0]
+        try:
+            df_to_save['stock_price'] = prices_df.loc[
+                df_to_save.open_time].values[:, 0]
+        except KeyError:
+            # It's likely that the server did not store some of the desired
+            # times. Just eat the loss and get rid of these times
+            to_remove = []
+            opens = df_to_save.open_time
+            indices = prices_df.index
+            for i in range(opens.shape[0]):
+                otime = opens.iloc[i]
+                if otime not in indices and otime not in to_remove:
+                    to_remove.append(otime)
+            print(('Removing times that do not appear in prices DatFrame:'
+                   '\n{}').format(to_remove))
+            for otime in to_remove:
+                df_to_save = df_to_save[df_to_save.open_time != otime]
+            df_to_save['stock_price'] = prices_df.loc[
+                df_to_save.open_time].values[:, 0]
 
         # Convert open_time to minutes_to_expiry, paying attention to timezones
         if verbose:
