@@ -251,6 +251,57 @@ def collect_statistics(trades_df):
 
     return trades_means, trades_vars
 
+def get_pooled_stats(expiry_path):
+
+    # Collect the statistics
+    means = []
+    variances = []
+    sample_sizes = []
+
+    # Get the stats for each DataFrame in the expiry tarball
+    for df in spreads_tarballs_to_generator(expiry_path, shuffle=True):
+        df_means, df_vars = collect_statistics(df)
+        means.append(df_means)
+        variances.append(df_vars)
+        sample_sizes.append(df.shape[0])
+
+    # Collect the numerators for both means and variances
+    pooled_means = None
+    pooled_vars = None
+    total_samples = sum(sample_sizes)
+    for i in range(len(sample_sizes)):
+        next_mean = means[i] * sample_sizes[i]
+        next_var = variances[i] * (sample_sizes[i] - 1)
+        try:
+            pooled_means += next_mean
+            pooled_vars += next_var
+        except TypeError:
+            pooled_means = next_mean
+            pooled_vars = next_var
+
+    # Divide the result by the respective denominators
+    pool_count = len(sample_sizes)
+    pooled_means /= total_samples
+    pooled_vars /= (total_samples - pool_count)
+
+    # Finally, reset some of the values that should not be changed
+    static_columns = ['open_margin', 'max_profit']
+    for i in range(1, 6):
+        type_col = 'leg{}_type'.format(i)
+        if type_col in means[0].index:
+            static_columns.append(type_col)
+
+    for c in static_columns:
+        try:
+            pooled_means[c] = 0
+            pooled_vars[c] = 1
+        except KeyError:
+            pass
+
+    # Also provide the number of samples with the stats for combining these
+    # pooled values with other pooled values later on
+    return pooled_means, pooled_vars, total_samples, pool_count
+
 def normalize_metadata_columns(trades_df):
     # We must not normalize the leg types since these columns are categorical.
     # So we give these specific columns mean 0 std 1 to make them unchanged
