@@ -14,6 +14,8 @@ import config
 
 DONE = 'finished'
 
+HEADER_TEMPLATE = '{name:<10} {id:>2}:'
+
 def collect_TA(ticker, dates):
     # return the technical analysis portion for the ticker to be used in the
     # final input vector
@@ -31,7 +33,7 @@ def call_put_spread_worker(
     max_margin=None,
     verbose=False
 ):
-    hdr = 'COLLECTOR {:>2}:'.format(id)
+    hdr = HEADER_TEMPLATE.format(name='COLLECTOR', id=id)
     if verbose:
         print('{} START'.format(hdr))
 
@@ -170,9 +172,8 @@ def filesystem_worker(
     ignore_loss=None,
     verbose=False,
 ):
-    hdr = 'SAVER {:>2}:'.format(id)
-    spread_list      = []
-    def save_piece():
+    hdr = HEADER_TEMPLATE.format(name='SAVER', id=id)
+
     def save_piece(spread_list):
         # Get ready to save by building the start of the DataFrame
         df_to_save = pd.concat(spread_list)
