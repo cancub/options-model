@@ -250,10 +250,15 @@ def filesystem_worker(
         print('{} START'.format(hdr))
 
     trades_in_memory = 0
+    started = False
     while True:
         # Grab a strike for the leg we will be longing
         try:
-            spread_df = input_q.get(timeout=10)
+            # Block until we get the very first element, after that, only wait
+            # one second, max. This allows us to quickly finish up but not be
+            # too impatient to start
+            spread_df = input_q.get(timeout=4 if started else None)
+            started = True
         except queue.Empty:
             break
 
