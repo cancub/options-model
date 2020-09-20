@@ -231,25 +231,29 @@ def sort_trades_df_columns(trades_df):
 
     return trades_df[meta_cols]
 
-def collect_statistics(trades_df):
-    trades_means = trades_df.mean()
-    trades_vars = trades_df.var()
-
+def set_standard_static_stats(means, variances):
     # Some columns should not be normalized
+    columns = means.index.values
     static_columns = ['open_margin', 'max_profit']
     for i in range(1, 5):
         type_col = 'leg{}_type'.format(i)
-        if type_col in trades_df.columns:
+        if type_col in columns:
             static_columns.append(type_col)
 
     for c in static_columns:
         try:
-            trades_means[c] = 0
-            trades_vars[c] = 1
+            means[c] = 0
+            variances[c] = 1
         except KeyError:
             pass
 
-    return trades_means, trades_vars
+    return means, variances
+
+def collect_statistics(trades_df):
+    trades_means = trades_df.mean()
+    trades_vars = trades_df.var()
+
+    return set_standard_static_stats(trades_means, trades_vars)
 
 def get_pooled_stats(expiry_path):
 
@@ -285,18 +289,8 @@ def get_pooled_stats(expiry_path):
     pooled_vars /= (total_samples - pool_count)
 
     # Finally, reset some of the values that should not be changed
-    static_columns = ['open_margin', 'max_profit']
-    for i in range(1, 6):
-        type_col = 'leg{}_type'.format(i)
-        if type_col in means[0].index:
-            static_columns.append(type_col)
-
-    for c in static_columns:
-        try:
-            pooled_means[c] = 0
-            pooled_vars[c] = 1
-        except KeyError:
-            pass
+    pooled_means, pooled_vars = set_standard_static_stats(pooled_means,
+                                                          pooled_vars)
 
     # Also provide the number of samples with the stats for combining these
     # pooled values with other pooled values later on
