@@ -33,9 +33,14 @@ def call_put_spread_worker(
     max_margin=None,
     verbose=False
 ):
-    hdr = HEADER_TEMPLATE.format(name='COLLECTOR', id=id)
-    if verbose:
-        print('{} START'.format(hdr))
+    def log(message):
+        print(
+            '{hdr} {msg}'.format(
+                hdr=HEADER_TEMPLATE.format(name='COLLECTOR', id=id),
+                msg = message
+            ))
+
+    log('START')
 
     while True:
         # Grab a strike for the leg we will be longing
@@ -98,7 +103,7 @@ def call_put_spread_worker(
         total_trades = leg1_df.shape[0]
         if total_trades == 0:
             if verbose:
-                print('{} count({}) = 0'.format(hdr, int(leg1_strike)))
+                log('count({}) = 0'.format(int(leg1_strike)))
             continue
 
         # Bring all of the indices into the dataframe to be columns
@@ -145,13 +150,12 @@ def call_put_spread_worker(
             columns={k: 'leg2_' + k for k in leg2_meta.keys()}, inplace=True)
 
         if verbose:
-            print('{} count({}) = {}'.format(
-                hdr, int(leg1_strike), total_trades))
+            log('count({}) = {}'.format(int(leg1_strike), total_trades))
 
         output_q.put(pd.concat((leg1_df.copy(), leg1_meta, leg2_meta), axis=1))
 
     if verbose:
-        print('{} COMPLETE'.format(hdr))
+        log('COMPLETE')
 
     # Signal to one of the filesystem workers that one of the spread workers is
     # done
@@ -172,14 +176,19 @@ def filesystem_worker(
     ignore_loss=None,
     verbose=False,
 ):
-    hdr = HEADER_TEMPLATE.format(name='SAVER', id=id)
+    def log(message):
+        print(
+            '{hdr} {msg}'.format(
+                hdr=HEADER_TEMPLATE.format(name='SAVER', id=id),
+                msg = message
+            ))
 
     def save_piece(spread_list):
         # Get ready to save by building the start of the DataFrame
         df_to_save = pd.concat(spread_list)
 
         if verbose:
-            print('{} processing {} spreads'.format(hdr, df_to_save.shape[0]))
+            log('processing {} spreads'.format(df_to_save.shape[0]))
 
         if winning_profit is not None and loss_win_ratio is not None:
             # Determine the max profits when purchasing one of these trades
@@ -204,7 +213,7 @@ def filesystem_worker(
         trades_in_memory = df_to_save.shape[0]
 
         if verbose:
-            print('{} saving {} spreads'.format(hdr, trades_in_memory))
+            log('saving {} spreads'.format(trades_in_memory))
         # Add in a column showing which option type was in use for each leg.
         # Use the values of 1 and -1 to that 0 can be used to signify an empty
         # leg when working with the model
@@ -217,7 +226,7 @@ def filesystem_worker(
             )
 
         if verbose:
-            print('{} adding security prices'.format(hdr))
+            log('adding security prices')
 
         try:
             df_to_save['stock_price'] = prices_df.loc[
@@ -232,7 +241,7 @@ def filesystem_worker(
                 otime = opens.iloc[i]
                 if otime not in indices and otime not in to_remove:
                     to_remove.append(otime)
-            print(('Removing times that do not appear in prices DatFrame:'
+            log(('Removing times that do not appear in prices DatFrame:'
                    '\n{}').format(to_remove))
             for otime in to_remove:
                 df_to_save = df_to_save[df_to_save.open_time != otime]
@@ -241,7 +250,7 @@ def filesystem_worker(
 
         # Convert open_time to minutes_to_expiry, paying attention to timezones
         if verbose:
-            print('{} converting open time to minutes to expiry'.format(hdr))
+            log('converting open time to minutes to expiry')
 
         # Get the opens as a UTC timedelta
         epoch_opens = df_to_save.open_time.apply(
@@ -256,11 +265,11 @@ def filesystem_worker(
 
         filepath = os.path.join(working_dir, '{}.bz2'.format(uuid.uuid4()))
         if verbose:
-            print('{} saving to {}'.format(hdr, filepath))
+            log('saving to {}'.format(filepath))
         df_to_save.reset_index(drop=True).to_pickle(filepath)
 
     if verbose:
-        print('{} START'.format(hdr))
+        log('START')
 
     trades_in_memory = 0
     spread_list = []
@@ -271,7 +280,7 @@ def filesystem_worker(
         # Quit in response to a spread worker quitting
         if isinstance(item, str) and item == DONE:
             if verbose:
-                print('Got {} signal from other side. Quitting.'.format(DONE))
+                log('Got {} signal from other side. Quitting.'.format(DONE))
             break
 
         # Add this DataFrame to the list and update the count
@@ -294,7 +303,7 @@ def filesystem_worker(
         save_piece(spread_list)
 
     if verbose:
-        print('{} COMPLETE'.format(hdr))
+        log('COMPLETE')
 
 def collect_spreads(
     ticker,
