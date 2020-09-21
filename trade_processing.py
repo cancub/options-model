@@ -396,7 +396,7 @@ def filesystem_worker(
         # leg when working with the model
         type_array = np.ones(trades_in_memory)
 
-        for i in range(1, 5):
+        for i in [1, 2, 3, 4]:
             if 'leg{}_strike'.format(i) not in df_to_save.columns:
                 break
             df_to_save.insert(

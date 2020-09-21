@@ -224,7 +224,7 @@ def sort_trades_df_columns(trades_df):
         leg{num}_rho
         leg{num}_openInterest
     '''
-    for i in range(1,5):
+    for i in [1, 2, 3, 4]:
         if 'leg{}_type'.format(i) not in trades_df.columns:
             break
         meta_cols += leg_col_names.format(num=i).split()
@@ -235,7 +235,7 @@ def set_standard_static_stats(means, variances):
     # Some columns should not be normalized
     columns = means.index.values
     static_columns = ['open_margin', 'max_profit']
-    for i in range(1, 5):
+    for i in [1, 2, 3, 4]:
         type_col = 'leg{}_type'.format(i)
         if type_col in columns:
             static_columns.append(type_col)
