@@ -30,6 +30,7 @@ def call_put_spread_worker(
     ask_df,
     strikes_q,
     output_q,
+    get_max_profit=True,
     max_margin=None,
     verbose=False
 ):
@@ -59,39 +60,44 @@ def call_put_spread_worker(
             open_margins[open_margins > max_margin] = np.nan
         open_margins = open_margins.stack(level=0, dropna=False)
 
-        # Do some magic to get the maximum profits. Open credits is simple:
-        # subtract the amount we pay for the first leg from the amount we
-        # receive from the second.
-        # NOTE: leave NaN in place to symbolize that this is not a viable trade.
-        #       these trades will be removed at the end.
-        open_credits = bid_df.sub(leg1_asks, axis='rows')
+        if get_max_profit:
+            # Do some magic to get the maximum profits. Open credits is simple:
+            # subtract the amount we pay for the first leg from the amount we
+            # receive from the second.
+            # NOTE: leave NaN in place to symbolize that this is not a viable
+            #       trade. These trades will be removed at the end.
+            open_credits = bid_df.sub(leg1_asks, axis='rows')
 
-        # When looking at the close credits, make sure to replace NaN with 0 on
-        # the close sides, because NaN implies the trade was worthless. This is
-        # good for leg 2 (since we buy it back for nothing at this timepoint)
-        # and bad for leg 1 (since we can't sell it at this time point).
-        # NOTE: make this 0.01 for the leg 2 side since if we want to close
-        #       early, we'd actually need to sell it for something.
-        close_credits = (-bid_df.fillna(0.01)).add(
-                            bid_df[leg1_strike].fillna(0), axis='rows')
+            # When looking at the close credits, make sure to replace NaN with 0
+            # on the close sides, because NaN implies the trade was worthless.
+            # This is good for leg 2 (since we buy it back for nothing at this
+            # timepoint) and bad for leg 1 (since we can't sell it at this time
+            # point).
+            # NOTE: make this 0.01 for the leg 2 side since if we want to close
+            #       early, we'd actually need to sell it for something.
+            close_credits = (-bid_df.fillna(0.01)).add(
+                                bid_df[leg1_strike].fillna(0), axis='rows')
 
-        # Get the forward-looking maximum  profitby reversing the values,
-        # applying a cumulative maximum, then flipping the result
-        #       1,   0,   2,   1,   5,   0
-        #       0,   5,   1,   2,   0,   1   (flip)
-        #       0,   5,   5,   5,   5,   5   (cummax)
-        #       5,   5,   5,   5,   5,   0   (flip)
-        close_credits = pd.DataFrame(
-            data    = np.flip(
-                            np.maximum.accumulate(
-                                np.flip(close_credits.values))),
-            columns = close_credits.columns,
-            index   = close_credits.index
-        )
+            # Get the forward-looking maximum  profitby reversing the values,
+            # applying a cumulative maximum, then flipping the result
+            #       1,   0,   2,   1,   5,   0
+            #       0,   5,   1,   2,   0,   1   (flip)
+            #       0,   5,   5,   5,   5,   5   (cummax)
+            #       5,   5,   5,   5,   5,   0   (flip)
+            close_credits = pd.DataFrame(
+                data    = np.flip(
+                                np.maximum.accumulate(
+                                    np.flip(close_credits.values))),
+                columns = close_credits.columns,
+                index   = close_credits.index
+            )
 
-        max_profits = open_credits + close_credits
-        max_profits = max_profits.stack(level=0, dropna=False)
-        leg1_df = pd.concat((open_margins, max_profits), axis=1)
+            max_profits = open_credits + close_credits
+            max_profits = max_profits.stack(level=0, dropna=False)
+            leg1_df = pd.concat((open_margins, max_profits), axis=1)
+        else:
+            # Looks like the strikes, open times, and margins are all we need
+            leg1_df = open_margins.to_frame()
 
         # Since we left the NaNs in place for the open credits, we can now strip
         # out the trades that we can't actually open because of:
@@ -187,6 +193,7 @@ def butterfly_spread_worker(
     ask_df,
     strikes_q,
     output_q,
+    get_max_profit=True,
     max_margin=None,
     verbose=False
 ):
@@ -235,43 +242,52 @@ def butterfly_spread_worker(
             # Fold this out so that we have a new index (leg 4 strikes)
             open_margins = open_margins.stack(level=0, dropna=False)
 
-            # Do some magic to get the maximum profits.
+            if get_max_profit:
+                # Do some magic to get the maximum profits.
 
-            # Open credits is simple:
-            # subtract the amount we pay for legs 1 (A) and leg 4 (C) from the
-            # amount we receive from legs 2 and 3 (both B).
-            # NOTE: leave NaN in place to symbolize that this is not a viable
-            #       trade. These trades will be removed at the end.
-            open_credits = (-C_asks).add(2 * B_bids - A_asks, axis='rows')
+                # Open credits is simple:
+                # subtract the amount we pay for legs 1 (A) and leg 4 (C) from
+                # the amount we receive from legs 2 and 3 (both B).
+                # NOTE: leave NaN in place to symbolize that this is not a
+                #       viable trade. These trades will be removed at the end.
+                open_credits = (-C_asks).add(2 * B_bids - A_asks, axis='rows')
 
-            # When looking at the close credits, make sure to replace NaN with 0
-            # on the close sides, because NaN implies the trade was worthless.
-            # This is good for legs 2 and 3 (since we buy them back for nothing
-            # at this timepoint) and bad for leg 1 and leg 4 (since we can't
-            # sell them this time point).
-            # NOTE: make this 0.01 for leg 2 and leg 3 since if we want to close
-            #       early, we'd actually need to sell it for something.
-            close_credits = bid_df[C_strikes].fillna(0).add(
-                bid_df[A_strike].fillna(0) - 2*ask_df[B_strike].fillna(0.01),
-                axis='rows')
+                # When looking at the close credits, make sure to replace NaN
+                # with 0 on the close sides, because NaN implies the trade was
+                # worthless. This is good for legs 2 and 3 (since we buy them
+                # back for nothing at this timepoint) and bad for leg 1 and leg
+                # 4 (since we can't sell them this time point).
+                # NOTE: make this 0.01 for leg 2 and leg 3 since if we want to
+                #       close early, we'd actually need to sell it for
+                #       something.
+                close_credits = bid_df[C_strikes].fillna(0).add(
+                    (bid_df[A_strike].fillna(0)
+                        - 2*ask_df[B_strike].fillna(0.01)),
+                    axis='rows')
 
-            # Get the forward-looking maximum  profitby reversing the values,
-            # applying a cumulative maximum, then flipping the result
-            #       1,   0,   2,   1,   5,   0
-            #       0,   5,   1,   2,   0,   1   (flip)
-            #       0,   5,   5,   5,   5,   5   (cummax)
-            #       5,   5,   5,   5,   5,   0   (flip)
-            close_credits = pd.DataFrame(
-                data    = np.flip(
-                                np.maximum.accumulate(
-                                    np.flip(close_credits.values))),
-                columns = close_credits.columns,
-                index   = close_credits.index
-            )
+                # Get the forward-looking maximum  profitby reversing the
+                # values, applying a cumulative maximum, then flipping the
+                # result.
+                #       1,   0,   2,   1,   5,   0
+                #       0,   5,   1,   2,   0,   1   (flip)
+                #       0,   5,   5,   5,   5,   5   (cummax)
+                #       5,   5,   5,   5,   5,   0   (flip)
+                close_credits = pd.DataFrame(
+                    data    = np.flip(
+                                    np.maximum.accumulate(
+                                        np.flip(close_credits.values))),
+                    columns = close_credits.columns,
+                    index   = close_credits.index
+                )
 
-            max_profits = open_credits + close_credits
-            max_profits = max_profits.stack(level=0, dropna=False)
-            a2b_df = pd.concat((open_margins, max_profits), axis=1)
+                max_profits = open_credits + close_credits
+                max_profits = max_profits.stack(level=0, dropna=False)
+                a2b_df = pd.concat((open_margins, max_profits), axis=1)
+
+            else:
+                # Looks like the strikes, open times, and margins are all we
+                # need
+                a2b_df = open_margins.to_frame()
 
             # Since we left the NaNs in place for the open credits, we can now
             # strip out the trades that we can't actually open because of:
@@ -367,6 +383,7 @@ def filesystem_worker(
     prices_df,
     max_spreads,
     option_type,
+    get_max_profit=True,
     winning_profit=None,
     loss_win_ratio=None,
     ignore_loss=None,
@@ -386,24 +403,25 @@ def filesystem_worker(
         if verbose:
             log('processing {} spreads'.format(df_to_save.shape[0]))
 
-        if winning_profit is not None and loss_win_ratio is not None:
-            # Determine the max profits when purchasing one of these trades
-            losers = df_to_save[df_to_save.max_profit < winning_profit]
-            winners = df_to_save[df_to_save.max_profit >= winning_profit]
-            total_winners = winners.shape[0]
+        if get_max_profit:
+            if winning_profit is not None and loss_win_ratio is not None:
+                # Determine the max profits when purchasing one of these trades
+                losers = df_to_save[df_to_save.max_profit < winning_profit]
+                winners = df_to_save[df_to_save.max_profit >= winning_profit]
+                total_winners = winners.shape[0]
 
-            # Get at most the desired ratio of losers to winners, using the
-            # losers that were closest to profit
-            losers_to_get = total_winners * loss_win_ratio
+                # Get at most the desired ratio of losers to winners, using the
+                # losers that were closest to profit
+                losers_to_get = total_winners * loss_win_ratio
 
-            df_to_save = pd.concat((
-                winners,
-                losers.sort_values(
-                    by='max_profit', ascending=False)[:losers_to_get]
-            ))
-        if ignore_loss is not None:
-            # Don't bother with trades we won't be using for training
-            df_to_save = df_to_save[df_to_save[1] > ignore_loss]
+                df_to_save = pd.concat((
+                    winners,
+                    losers.sort_values(
+                        by='max_profit', ascending=False)[:losers_to_get]
+                ))
+            if ignore_loss is not None:
+                # Don't bother with trades we won't be using for training
+                df_to_save = df_to_save[df_to_save[1] > ignore_loss]
 
         # Update the count
         trades_in_memory = df_to_save.shape[0]
@@ -510,6 +528,7 @@ def collect_spreads(
     procs_pairs=5,
     max_margin=config.MARGIN,
     ignore_loss=None,
+    get_max_profit=True,
     winning_profit=None,
     loss_win_ratio=None,
     max_spreads_per_file=25000,
@@ -579,13 +598,14 @@ def collect_spreads(
                     p = multiprocessing.Process(
                         target=collecter,
                         args=(i,
-                            option_type_df,
-                            bid_df,
-                            ask_df,
-                            strikes_q,
-                            working_q,
-                            max_margin,
-                            verbose,)
+                              option_type_df,
+                              bid_df,
+                              ask_df,
+                              strikes_q,
+                              working_q,
+                              get_max_profit,
+                              max_margin,
+                              verbose,)
                     )
                     p.start()
                     processes.append(p)
@@ -594,18 +614,19 @@ def collect_spreads(
                     p = multiprocessing.Process(
                         target=filesystem_worker,
                         args=(i,
-                            working_q,
-                            tmpdir,
-                            ticker,
-                            epoch,
-                            epoch_expiry,
-                            prices_df,
-                            max_spreads_per_file,
-                            o,
-                            winning_profit,
-                            loss_win_ratio,
-                            ignore_loss,
-                            verbose,)
+                              working_q,
+                              tmpdir,
+                              ticker,
+                              epoch,
+                              epoch_expiry,
+                              prices_df,
+                              max_spreads_per_file,
+                              o,
+                              get_max_profit,
+                              winning_profit,
+                              loss_win_ratio,
+                              ignore_loss,
+                              verbose,)
                     )
                     p.start()
                     processes.append(p)
