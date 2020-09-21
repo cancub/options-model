@@ -14,7 +14,7 @@ import config
 
 DONE = 'finished'
 
-HEADER_TEMPLATE = '{name:<10} {id:>2}:'
+HEADER_TEMPLATE = '{name:<15} {id:>2}:'
 
 def collect_TA(ticker, dates):
     # return the technical analysis portion for the ticker to be used in the
@@ -28,7 +28,7 @@ def call_put_spread_worker(
     option_type_df,
     bid_df,
     ask_df,
-    buy_strikes_q,
+    strikes_q,
     output_q,
     max_margin=None,
     verbose=False
@@ -36,7 +36,7 @@ def call_put_spread_worker(
     def log(message):
         print(
             '{hdr} {msg}'.format(
-                hdr=HEADER_TEMPLATE.format(name='COLLECTOR', id=id),
+                hdr=HEADER_TEMPLATE.format(name='CP_COLLECTOR', id=id),
                 msg = message
             ))
 
@@ -45,7 +45,7 @@ def call_put_spread_worker(
     while True:
         # Grab a strike for the leg we will be longing
         try:
-            leg1_strike = buy_strikes_q.get(timeout=1)
+            leg1_strike = strikes_q.get(timeout=1)
         except queue.Empty:
             break
 
@@ -161,6 +161,183 @@ def call_put_spread_worker(
     # done
     output_q.put(DONE)
 
+def butterfly_spread_worker(
+    id,
+    option_type_df,
+    bid_df,
+    ask_df,
+    strikes_q,
+    output_q,
+    max_margin=None,
+    verbose=False
+):
+    def log(message):
+        print(
+            '{hdr} {msg}'.format(
+                hdr=HEADER_TEMPLATE.format(name='BFLY_COLLECTOR', id=id),
+                msg = message
+            ))
+
+    log('START')
+
+    while True:
+        # Grab a strike for the leg we will be longing
+        try:
+            B_strike = strikes_q.get(timeout=1)
+        except queue.Empty:
+            break
+
+        all_strikes = ask_df.columns
+
+        # The lower strike
+        A_strikes = all_strikes[all_strikes < B_strike]
+
+        # The higher strike
+        C_strikes = all_strikes[all_strikes > B_strike]
+
+        if 0 in (len(A_strikes), len(C_strikes)):
+            if verbose:
+                log('count(:,{},:) = 0'.format(int(B_strike)))
+            continue
+
+        B_bids = bid_df[B_strike]
+        C_asks = ask_df[C_strikes]
+
+        for A_strike in A_strikes:
+            A_asks = ask_df[A_strike]
+
+            # Figure out how much margin we'd need for this trade
+            open_margins = C_asks.add(2 * B_bids + A_asks, axis='rows')
+
+            # Pretend that the too-expensive trades don't exist
+            if max_margin is not None:
+                open_margins[open_margins > max_margin] = np.nan
+
+            # Fold this out so that we have a new index (leg 4 strikes)
+            open_margins = open_margins.stack(level=0, dropna=False)
+
+            # Do some magic to get the maximum profits.
+
+            # Open credits is simple:
+            # subtract the amount we pay for legs 1 (A) and leg 4 (C) from the
+            # amount we receive from legs 2 and 3 (both B).
+            # NOTE: leave NaN in place to symbolize that this is not a viable
+            #       trade. These trades will be removed at the end.
+            open_credits = (-C_asks).add(2 * B_bids - A_asks, axis='rows')
+
+            # When looking at the close credits, make sure to replace NaN with 0
+            # on the close sides, because NaN implies the trade was worthless.
+            # This is good for legs 2 and 3 (since we buy them back for nothing
+            # at this timepoint) and bad for leg 1 and leg 4 (since we can't
+            # sell them this time point).
+            # NOTE: make this 0.01 for leg 2 and leg 3 since if we want to close
+            #       early, we'd actually need to sell it for something.
+            close_credits = bid_df[C_strikes].fillna(0).add(
+                bid_df[A_strike].fillna(0) - 2*ask_df[B_strike].fillna(0.01),
+                axis='rows')
+
+            # Get the forward-looking maximum  profitby reversing the values,
+            # applying a cumulative maximum, then flipping the result
+            #       1,   0,   2,   1,   5,   0
+            #       0,   5,   1,   2,   0,   1   (flip)
+            #       0,   5,   5,   5,   5,   5   (cummax)
+            #       5,   5,   5,   5,   5,   0   (flip)
+            close_credits = pd.DataFrame(
+                data    = np.flip(
+                                np.maximum.accumulate(
+                                    np.flip(close_credits.values))),
+                columns = close_credits.columns,
+                index   = close_credits.index
+            )
+
+            max_profits = open_credits + close_credits
+            max_profits = max_profits.stack(level=0, dropna=False)
+            a2b_df = pd.concat((open_margins, max_profits), axis=1)
+
+            # Since we left the NaNs in place for the open credits, we can now
+            # strip out the trades that we can't actually open because of:
+            #   credits -> one or more sides weren't there to open, or
+            #   margin  -> the combination was too pricey
+            a2b_df.dropna(inplace=True)
+
+            # If there's nothing left, then we can just skip this combination
+            # of legs 1, 2 and 3
+            total_trades = a2b_df.shape[0]
+            if total_trades == 0:
+                if verbose:
+                    log('count({},{},:) = 0'.format(
+                            int(A_strike),int(B_strike)))
+                continue
+
+            # Bring all of the indices into the dataframe to be columns
+            a2b_df.reset_index(level=[0, 1], inplace=True)
+
+            # The column names are all funky after the reset_index
+            rename_dict = {
+                'datetime': 'open_time',
+                'strike': 'leg4_strike',
+                0: 'open_margin',
+                1: 'max_profit'
+            }
+            a2b_df = a2b_df.rename(columns=rename_dict)
+
+            # Add in the strikes for legs 1, 2 and 3
+            leg1_strikes = np.full(total_trades, A_strike)
+            leg2_strikes = np.full(total_trades, B_strike)
+            a2b_df.insert(0, 'leg1_strike', leg1_strikes)
+            a2b_df.insert(0, 'leg2_strike', leg2_strikes)
+            a2b_df.insert(0, 'leg3_strike', leg2_strikes)
+
+            all_open_times = a2b_df.open_time
+            leg4_strikes = a2b_df.leg4_strike
+
+            leg1_meta = option_type_df.loc[
+                zip(all_open_times, leg1_strikes)].reset_index(drop=True)
+            leg2_meta = option_type_df.loc[
+                zip(all_open_times, leg2_strikes)].reset_index(drop=True)
+            leg4_meta = option_type_df.loc[
+                zip(all_open_times, leg4_strikes)].reset_index(drop=True)
+
+            # There are the credits for the opens. Since we're buying legs 1 (A)
+            # and 4 (C), we get rid of their bidPrices and we inver the askPrice
+            # 4
+            leg1_meta.drop(['bidPrice'], axis=1, inplace=True)
+            leg4_meta.drop(['bidPrice'], axis=1, inplace=True)
+            leg1_meta.askPrice *= -1
+            leg4_meta.askPrice *= -1
+
+            # Meanwhile, we're selling legs 2 and 3, so get rid of the askPrice
+            leg2_meta.drop(['askPrice'], axis=1, inplace=True)
+
+            # Make a copy of leg2_meta to get the third leg
+            leg3_meta = leg2_meta.copy()
+
+            # We need to rename each of the columns
+            leg1_meta.rename(columns={k: 'leg1_' + k for k in leg1_meta.keys()},
+                             inplace=True)
+            leg2_meta.rename(columns={k: 'leg2_' + k for k in leg2_meta.keys()},
+                             inplace=True)
+            leg3_meta.rename(columns={k: 'leg3_' + k for k in leg3_meta.keys()},
+                             inplace=True)
+            leg4_meta.rename(columns={k: 'leg4_' + k for k in leg4_meta.keys()},
+                             inplace=True)
+
+            if verbose:
+                log('count({},{},:) = {}'.format(
+                    int(A_strike), int(B_strike), total_trades))
+
+            output_q.put(
+                pd.concat(
+                    (a2b_df.copy(), leg1_meta, leg2_meta, leg3_meta, leg4_meta),
+                    axis=1))
+
+    if verbose:
+        log('COMPLETE')
+
+    # Signal to one of the filesystem workers that one of the spread workers is
+    # done
+    output_q.put(DONE)
+
 def filesystem_worker(
     id,
     input_q,
@@ -218,10 +395,13 @@ def filesystem_worker(
         # Use the values of 1 and -1 to that 0 can be used to signify an empty
         # leg when working with the model
         type_array = np.ones(trades_in_memory)
-        for leg in ['leg1', 'leg2']:
+
+        for i in range(1, 5):
+            if 'leg{}_strike'.format(i) not in df_to_save.columns:
+                break
             df_to_save.insert(
                 0,
-                leg + '_type',
+                'leg{}_type'.format(i),
                 (-1 if option_type == 'P' else 1) * type_array
             )
 
@@ -323,7 +503,7 @@ def collect_spreads(
     tmpdir = tempfile.mkdtemp(prefix='tp-')
 
     # First we need a Queue of the strikes to be used for the buying leg.
-    buy_strikes_q = multiprocessing.Queue()
+    strikes_q = multiprocessing.Queue()
 
     # And the threads will put their resulting DataFrames into this queue
     working_q = multiprocessing.Queue()
@@ -366,49 +546,54 @@ def collect_spreads(
         bid_df = option_type_df['bidPrice'].unstack(level=[1])
         ask_df = option_type_df['askPrice'].unstack(level=[1])
 
-        # Load in the buy-leg strikes so that the threads can pull them out
-        for s in ask_df.columns:
-            buy_strikes_q.put(s)
-
         if not debug:
-            processes = []
-            for i in range(procs_pairs):
-                p = multiprocessing.Process(
-                    target=call_put_spread_worker,
-                    args=(i,
-                          option_type_df,
-                          bid_df,
-                          ask_df,
-                          buy_strikes_q,
-                          working_q,
-                          max_margin,
-                          verbose,)
-                )
-                p.start()
-                processes.append(p)
+            for collecter in (call_put_spread_worker, butterfly_spread_worker):
+                if verbose:
+                    print('Working with {}'.format(collecter))
 
-            for i in range(procs_pairs):
-                p = multiprocessing.Process(
-                    target=filesystem_worker,
-                    args=(i,
-                          working_q,
-                          tmpdir,
-                          ticker,
-                          epoch,
-                          epoch_expiry,
-                          prices_df,
-                          max_spreads_per_file,
-                          o,
-                          winning_profit,
-                          loss_win_ratio,
-                          ignore_loss,
-                          verbose,)
-                )
-                p.start()
-                processes.append(p)
+                # Load in the list of strikes so that the threads can pull them
+                # out
+                for s in ask_df.columns:
+                    strikes_q.put(s)
 
-            for p in processes:
-                p.join()
+                processes = []
+                for i in range(procs_pairs):
+                    p = multiprocessing.Process(
+                        target=collecter,
+                        args=(i,
+                            option_type_df,
+                            bid_df,
+                            ask_df,
+                            strikes_q,
+                            working_q,
+                            max_margin,
+                            verbose,)
+                    )
+                    p.start()
+                    processes.append(p)
+
+                for i in range(procs_pairs):
+                    p = multiprocessing.Process(
+                        target=filesystem_worker,
+                        args=(i,
+                            working_q,
+                            tmpdir,
+                            ticker,
+                            epoch,
+                            epoch_expiry,
+                            prices_df,
+                            max_spreads_per_file,
+                            o,
+                            winning_profit,
+                            loss_win_ratio,
+                            ignore_loss,
+                            verbose,)
+                    )
+                    p.start()
+                    processes.append(p)
+
+                for p in processes:
+                    p.join()
 
         else:
             call_put_spread_worker(
@@ -416,7 +601,7 @@ def collect_spreads(
                 option_type_df,
                 bid_df,
                 ask_df,
-                buy_strikes_q,
+                strikes_q,
                 working_q,
                 max_margin,
                 verbose,
