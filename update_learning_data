@@ -1,0 +1,81 @@
+#! /usr/bin/env python
+import os
+import pandas as pd
+import sys
+
+import config
+import utils
+
+avoid_tickers = ['AAPL', 'TSLA']
+
+try:
+    tickers = [sys.argv[1]]
+except:
+    tickers = sorted((t for t in os.listdir(config.EXPIRIES_DIR)
+                        if t not in avoid_tickers))
+
+for ticker in tickers:
+    print('{star}{tik}{star}'.format(star='='*40, tik=ticker))
+    raw_dir = os.path.join(config.EXPIRIES_DIR, ticker)
+    spread_dir = os.path.join(config.ML_DATA_DIR, ticker)
+
+    raw_expiries = [os.path.splitext(r)[0] for r in os.listdir(raw_dir)]
+    try:
+        spread_expiries = [os.path.splitext(s)[0]
+                           for s in os.listdir(spread_dir)]
+    except FileNotFoundError:
+        spread_expiries = []
+
+    # Find the expiries that have yet to be processed
+    to_add = sorted(list(set(raw_expiries) - set(spread_expiries)))
+    print('Missing spreads: {}'.format(to_add))
+
+    for exp in to_add:
+        print('\n\nLoading spreads for {}\n\n'.format(exp))
+        # Load up and save the spreads for this missing expiry
+        utils.load_spreads(ticker, exp, verbose=True)
+
+    # Now load up the stats DataFrame to see which of the expiries is not included
+    spread_stats_df_path = os.path.join(spread_dir, 'stats')
+    try:
+        stats_df = pd.read_pickle(spread_stats_df_path)
+    except FileNotFoundError:
+        stats_df = None
+        to_add = raw_expiries
+    else:
+        to_add = list(set(raw_expiries) - set(stats_df.index.unique(level=0)))
+
+    if len(to_add) == 0:
+        continue
+
+    print('Missing stats: {}'.format(to_add))
+
+    # Gather the data on these missing expiries
+    new_stats_df_list = []
+    for exp in to_add:
+        print('Adding stats for {}'.format(exp))
+        exp_spreads_path = os.path.join(spread_dir, '{}.tar'.format(exp))
+        means, variances, samples, pools = utils.pool_stats_from_expiry(
+            exp_spreads_path)
+
+        # Make the DataFrame for this expiry's stats
+        base_df = pd.concat((means, variances), axis=1).transpose()
+        mi = pd.MultiIndex.from_product(
+            ((exp,), ('mean', 'variance')),
+            names=['expiry', 'stat']
+        )
+        base_df.index = mi
+        base_df.insert(0, 'samples', [samples, samples])
+        base_df.insert(0, 'pools', [pools, pools])
+
+        # Add this data to the stats DataFrame
+        new_stats_df_list.append(base_df)
+
+    # Concatenate all of the new stats as with the current stats
+    if stats_df is not None:
+        stats_df = pd.concat([stats_df] + new_stats_df_list)
+    else:
+        stats_df = pd.concat(new_stats_df_list)
+
+    # Save the stats file
+    stats_df.to_pickle(spread_stats_df_path)
