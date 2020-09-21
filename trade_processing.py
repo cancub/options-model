@@ -122,6 +122,10 @@ def call_put_spread_worker(
         leg1_strikes = np.full(total_trades, leg1_strike)
         leg1_df.insert(0, 'leg1_strike', leg1_strikes)
 
+        # Also add in the strikes for (non-existent) legs 3 and 4
+        leg1_df.insert(0, 'leg3_strike', np.zeros(total_trades))
+        leg1_df.insert(0, 'leg4_strike', np.zeros(total_trades))
+
         all_open_times = leg1_df.open_time
         leg2_strikes = leg1_df.leg2_strike
 
@@ -143,16 +147,31 @@ def call_put_spread_worker(
         leg1_meta.rename(columns={'askPrice': 'credit'}, inplace=True)
         leg2_meta.rename(columns={'bidPrice': 'credit'}, inplace=True)
 
+        orig_names = leg1_meta.keys()
+
         # We need to rename each of the columns
         leg1_meta.rename(
-            columns={k: 'leg1_' + k for k in leg1_meta.keys()}, inplace=True)
+            columns={k: 'leg1_' + k for k in orig_names}, inplace=True)
         leg2_meta.rename(
-            columns={k: 'leg2_' + k for k in leg2_meta.keys()}, inplace=True)
+            columns={k: 'leg2_' + k for k in orig_names}, inplace=True)
+
+        # The model will be expecting 4 legs, so fill in the remainder with 0s
+        leg3_meta = pd.DataFrame(
+            data=np.zeros(leg1_meta.shape),
+            columns=['leg3_' + k for k in orig_names]
+        )
+        leg4_meta = pd.DataFrame(
+            data=np.zeros(leg1_meta.shape),
+            columns=['leg4_' + k for k in orig_names]
+        )
 
         if verbose:
             log('count({}) = {}'.format(int(leg1_strike), total_trades))
 
-        output_q.put(pd.concat((leg1_df.copy(), leg1_meta, leg2_meta), axis=1))
+        output_q.put(
+            pd.concat(
+                (leg1_df.copy(), leg1_meta, leg2_meta, leg3_meta, leg4_meta),
+                axis=1))
 
     if verbose:
         log('COMPLETE')
@@ -391,19 +410,18 @@ def filesystem_worker(
 
         if verbose:
             log('saving {} spreads'.format(trades_in_memory))
+
         # Add in a column showing which option type was in use for each leg.
         # Use the values of 1 and -1 to that 0 can be used to signify an empty
         # leg when working with the model
         type_array = np.ones(trades_in_memory)
-
+        empty_array = np.zeros(trades_in_memory)
         for i in [1, 2, 3, 4]:
-            if 'leg{}_strike'.format(i) not in df_to_save.columns:
-                break
-            df_to_save.insert(
-                0,
-                'leg{}_type'.format(i),
-                (-1 if option_type == 'P' else 1) * type_array
-            )
+            if df_to_save['leg{}_strike'.format(i)].iloc[0] != 0:
+                leg_array = (-1 if option_type == 'P' else 1) * type_array
+            else:
+                leg_array = empty_array
+            df_to_save.insert(0, 'leg{}_type'.format(i), leg_array)
 
         if verbose:
             log('adding security prices')
