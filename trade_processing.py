@@ -28,6 +28,7 @@ def call_put_spread_worker(
     option_type_df,
     bid_df,
     ask_df,
+    prices_df,
     strikes_q,
     output_q,
     get_max_profit=True,
@@ -186,11 +187,14 @@ def call_put_spread_worker(
     # done
     output_q.put(DONE)
 
+WINDOW = 3
+
 def butterfly_spread_worker(
     id,
     option_type_df,
     bid_df,
     ask_df,
+    prices_df,
     strikes_q,
     output_q,
     get_max_profit=True,
@@ -215,6 +219,25 @@ def butterfly_spread_worker(
         except queue.Empty:
             break
 
+        # Only look at time where this strike was at least somewhat close to the
+        # price of the underlying security. Remove this to collect even the
+        # weird trades
+        viable_times = prices_df[
+            (( (B_strike - WINDOW) < prices_df) &
+               (prices_df < (B_strike + WINDOW) ))[0]
+        ].index
+
+        if viable_times.shape[0] == 0:
+            if verbose:
+                log('count(:,{},:) = 0 (outside range)'.format(int(B_strike)))
+            continue
+
+        # Ok, we know that there were at least some times where this trade made
+        # sense according to current conventions. Let's use those times moving
+        # forward
+        viable_opens = bid_df.index.isin(viable_times)
+        viable_bid_df = bid_df[viable_opens]
+        viable_ask_df = ask_df[viable_opens]
 
         # The lower strike
         A_strikes = all_strikes[all_strikes < B_strike]
@@ -227,11 +250,11 @@ def butterfly_spread_worker(
                 log('count(:,{},:) = 0'.format(int(B_strike)))
             continue
 
-        B_bids = bid_df[B_strike]
-        C_asks = ask_df[C_strikes]
+        B_bids = viable_bid_df[B_strike]
+        C_asks = viable_ask_df[C_strikes]
 
         for A_strike in A_strikes:
-            A_asks = ask_df[A_strike]
+            A_asks = viable_ask_df[A_strike]
 
             # Figure out how much margin we'd need for this trade
             open_margins = C_asks.add(2 * B_bids + A_asks, axis='rows')
@@ -263,7 +286,7 @@ def butterfly_spread_worker(
                 #       something.
                 close_credits = bid_df[C_strikes].fillna(0).add(
                     (bid_df[A_strike].fillna(0)
-                        - 2*ask_df[B_strike].fillna(0.01)),
+                    - 2*ask_df[B_strike].fillna(0.01)),
                     axis='rows')
 
                 # Get the forward-looking maximum  profitby reversing the
@@ -273,13 +296,15 @@ def butterfly_spread_worker(
                 #       0,   5,   1,   2,   0,   1   (flip)
                 #       0,   5,   5,   5,   5,   5   (cummax)
                 #       5,   5,   5,   5,   5,   0   (flip)
+                # Trim down the close_credits so that we only look at the time
+                # indices that match our viable_opens
                 close_credits = pd.DataFrame(
                     data    = np.flip(
                                     np.maximum.accumulate(
                                         np.flip(close_credits.values))),
                     columns = close_credits.columns,
                     index   = close_credits.index
-                )
+                )[viable_opens]
 
                 max_profits = open_credits + close_credits
                 max_profits = max_profits.stack(level=0, dropna=False)
@@ -335,8 +360,8 @@ def butterfly_spread_worker(
                 zip(all_open_times, leg4_strikes)].reset_index(drop=True)
 
             # There are the credits for the opens. Since we're buying legs 1 (A)
-            # and 4 (C), we get rid of their bidPrices and we inver the askPrice
-            # 4
+            # and 4 (C), we get rid of their bidPrices and we invert the
+            # askPrice
             leg1_meta.drop(['bidPrice'], axis=1, inplace=True)
             leg4_meta.drop(['bidPrice'], axis=1, inplace=True)
             leg1_meta.askPrice *= -1
@@ -345,6 +370,7 @@ def butterfly_spread_worker(
             # Meanwhile, we're selling legs 2 and 3, so get rid of the askPrice
             leg2_meta.drop(['askPrice'], axis=1, inplace=True)
 
+            # Rename the prices to "credits"
             leg1_meta.rename(columns={'askPrice': 'credit'}, inplace=True)
             leg4_meta.rename(columns={'askPrice': 'credit'}, inplace=True)
             leg2_meta.rename(columns={'bidPrice': 'credit'}, inplace=True)
@@ -590,9 +616,6 @@ def collect_spreads(
 
         if not debug:
             for collecter in (call_put_spread_worker, butterfly_spread_worker):
-                if verbose:
-                    print('Working with {}'.format(collecter))
-
                 # Load in the list of strikes so that the threads can pull them
                 # out
                 for s in ask_df.columns:
@@ -606,6 +629,7 @@ def collect_spreads(
                               option_type_df,
                               bid_df,
                               ask_df,
+                              prices_df,
                               strikes_q,
                               working_q,
                               get_max_profit,
