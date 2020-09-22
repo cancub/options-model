@@ -98,6 +98,16 @@ def load_spreads(
 
     return spreads_path
 
+def apply_func_to_dfs_in_tarball(tarball_path, func):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        file_list = extract_and_get_file_list(tarball_path, tmpdir)
+        for f in file_list:
+            fpath = os.path.join(tmpdir, f)
+            df = func(pd.read_pickle(fpath))
+            df.to_pickle(fpath)
+        subprocess.check_call(
+            ['tar', '-C', tmpdir, '-cf', tarball_path] + file_list)
+
 def extract_and_get_file_list(tarball_path, output_dir):
     files_bytes = subprocess.check_output(
         ['tar', '-C', output_dir, '-xvf', tarball_path])
