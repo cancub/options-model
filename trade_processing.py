@@ -345,6 +345,10 @@ def butterfly_spread_worker(
             # Meanwhile, we're selling legs 2 and 3, so get rid of the askPrice
             leg2_meta.drop(['askPrice'], axis=1, inplace=True)
 
+            leg1_meta.rename(columns={'askPrice': 'credit'}, inplace=True)
+            leg4_meta.rename(columns={'askPrice': 'credit'}, inplace=True)
+            leg2_meta.rename(columns={'bidPrice': 'credit'}, inplace=True)
+
             # Make a copy of leg2_meta to get the third leg
             leg3_meta = leg2_meta.copy()
 
