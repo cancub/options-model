@@ -206,6 +206,8 @@ def butterfly_spread_worker(
 
     log('START')
 
+    all_strikes = ask_df.columns
+
     while True:
         # Grab a strike for the leg we will be longing
         try:
@@ -213,7 +215,6 @@ def butterfly_spread_worker(
         except queue.Empty:
             break
 
-        all_strikes = ask_df.columns
 
         # The lower strike
         A_strikes = all_strikes[all_strikes < B_strike]
