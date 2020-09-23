@@ -77,7 +77,7 @@ def call_put_spread_worker(
             # point).
             # NOTE: make this 0.01 for the leg 2 side since if we want to close
             #       early, we'd actually need to sell it for something.
-            close_credits = (-bid_df.fillna(0.01)).add(
+            close_credits = (-ask_df.fillna(0.01)).add(
                                 bid_df[leg1_strike].fillna(0), axis='rows')
 
             # Get the forward-looking maximum  profitby reversing the values,
