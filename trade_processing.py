@@ -36,6 +36,7 @@ def call_put_spread_worker(
     verbose=False
 ):
     def log(message):
+        if not verbose: return
         print(
             '{hdr} {msg}'.format(
                 hdr=HEADER_TEMPLATE.format(name='CP_COLLECTOR', id=id),
@@ -109,8 +110,7 @@ def call_put_spread_worker(
         # If there's nothing left, then we can just skip this leg 1 strike
         total_trades = leg1_df.shape[0]
         if total_trades == 0:
-            if verbose:
-                log('count({}) = 0'.format(int(leg1_strike)))
+            log('count({}) = 0'.format(int(leg1_strike)))
             continue
 
         # Bring all of the indices into the dataframe to be columns
@@ -172,16 +172,14 @@ def call_put_spread_worker(
             columns=['leg4_' + k for k in orig_names]
         )
 
-        if verbose:
-            log('count({}) = {}'.format(int(leg1_strike), total_trades))
+        log('count({}) = {}'.format(int(leg1_strike), total_trades))
 
         output_q.put(
             pd.concat(
                 (leg1_df.copy(), leg1_meta, leg2_meta, leg3_meta, leg4_meta),
                 axis=1))
 
-    if verbose:
-        log('COMPLETE')
+    log('COMPLETE')
 
     # Signal to one of the filesystem workers that one of the spread workers is
     # done
@@ -202,6 +200,7 @@ def butterfly_spread_worker(
     verbose=False
 ):
     def log(message):
+        if not verbose: return
         print(
             '{hdr} {msg}'.format(
                 hdr=HEADER_TEMPLATE.format(name='BFLY_COLLECTOR', id=id),
@@ -228,8 +227,7 @@ def butterfly_spread_worker(
         ].index
 
         if viable_times.shape[0] == 0:
-            if verbose:
-                log('count(:,{},:) = 0 (outside range)'.format(int(B_strike)))
+            log('count(:,{},:) = 0 (outside range)'.format(int(B_strike)))
             continue
 
         # Ok, we know that there were at least some times where this trade made
@@ -246,8 +244,7 @@ def butterfly_spread_worker(
         C_strikes = all_strikes[all_strikes > B_strike]
 
         if 0 in (len(A_strikes), len(C_strikes)):
-            if verbose:
-                log('count(:,{},:) = 0'.format(int(B_strike)))
+            log('count(:,{},:) = 0'.format(int(B_strike)))
             continue
 
         B_bids = viable_bid_df[B_strike]
@@ -325,9 +322,7 @@ def butterfly_spread_worker(
             # of legs 1, 2 and 3
             total_trades = a2b_df.shape[0]
             if total_trades == 0:
-                if verbose:
-                    log('count({},{},:) = 0'.format(
-                            int(A_strike),int(B_strike)))
+                log('count({},{},:) = 0'.format(int(A_strike),int(B_strike)))
                 continue
 
             # Bring all of the indices into the dataframe to be columns
@@ -388,8 +383,7 @@ def butterfly_spread_worker(
             leg4_meta.rename(columns={k: 'leg4_' + k for k in leg4_meta.keys()},
                              inplace=True)
 
-            if verbose:
-                log('count({},{},:) = {}'.format(
+            log('count({},{},:) = {}'.format(
                     int(A_strike), int(B_strike), total_trades))
 
             output_q.put(
@@ -397,8 +391,7 @@ def butterfly_spread_worker(
                     (a2b_df.copy(), leg1_meta, leg2_meta, leg3_meta, leg4_meta),
                     axis=1))
 
-    if verbose:
-        log('COMPLETE')
+    log('COMPLETE')
 
     # Signal to one of the filesystem workers that one of the spread workers is
     # done
@@ -421,6 +414,7 @@ def filesystem_worker(
     verbose=False,
 ):
     def log(message):
+        if not verbose: return
         print(
             '{hdr} {msg}'.format(
                 hdr=HEADER_TEMPLATE.format(name='SAVER', id=id),
@@ -431,8 +425,7 @@ def filesystem_worker(
         # Get ready to save by building the start of the DataFrame
         df_to_save = pd.concat(spread_list)
 
-        if verbose:
-            log('processing {} spreads'.format(df_to_save.shape[0]))
+        log('processing {} spreads'.format(df_to_save.shape[0]))
 
         if get_max_profit:
             if winning_profit is not None and loss_win_ratio is not None:
@@ -457,8 +450,7 @@ def filesystem_worker(
         # Update the count
         trades_in_memory = df_to_save.shape[0]
 
-        if verbose:
-            log('saving {} spreads'.format(trades_in_memory))
+        log('saving {} spreads'.format(trades_in_memory))
 
         # Add in a column showing which option type was in use for each leg.
         # Use the values of 1 and -1 to that 0 can be used to signify an empty
@@ -472,8 +464,7 @@ def filesystem_worker(
                 leg_array = empty_array
             df_to_save.insert(0, 'leg{}_type'.format(i), leg_array)
 
-        if verbose:
-            log('adding security prices')
+        log('adding security prices')
 
         try:
             df_to_save['stock_price'] = prices_df.loc[
@@ -496,8 +487,7 @@ def filesystem_worker(
                 df_to_save.open_time].values[:, 0]
 
         # Convert open_time to minutes_to_expiry, paying attention to timezones
-        if verbose:
-            log('converting open time to minutes to expiry')
+        log('converting open time to minutes to expiry')
 
         # Get the opens as a UTC timedelta
         epoch_opens = df_to_save.open_time.apply(
@@ -511,12 +501,10 @@ def filesystem_worker(
         )
 
         filepath = os.path.join(working_dir, '{}.bz2'.format(uuid.uuid4()))
-        if verbose:
-            log('saving to {}'.format(filepath))
+        log('saving to {}'.format(filepath))
         df_to_save.reset_index(drop=True).to_pickle(filepath)
 
-    if verbose:
-        log('START')
+    log('START')
 
     trades_in_memory = 0
     spread_list = []
@@ -526,8 +514,7 @@ def filesystem_worker(
 
         # Quit in response to a spread worker quitting
         if isinstance(item, str) and item == DONE:
-            if verbose:
-                log('Got {} signal from other side. Quitting.'.format(DONE))
+            log('Got {} signal from other side. Quitting.'.format(DONE))
             break
 
         # Add this DataFrame to the list and update the count
@@ -549,8 +536,7 @@ def filesystem_worker(
     if trades_in_memory > 0:
         save_piece(spread_list)
 
-    if verbose:
-        log('COMPLETE')
+    log('COMPLETE')
 
 def collect_spreads(
     ticker,
