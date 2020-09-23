@@ -548,6 +548,7 @@ def collect_spreads(
     ticker,
     expiry,
     options_df,
+    prices_df=None,
     procs_pairs=5,
     max_margin=config.MARGIN,
     ignore_loss=None,
@@ -582,20 +583,21 @@ def collect_spreads(
     epoch_expiry = expiry_dt - epoch
 
     # Get the full set of prices that occured during this dataframe
-    if verbose:
-        print('Collecting security prices')
-    all_times = options_df.index.get_level_values(level=0)
-    qs = QuestradeSecurities()
-    candles = qs.get_candlesticks(
-        ticker,
-        str(all_times[0]-timedelta(minutes=5)),
-        str(all_times[-1]),
-        'FiveMinutes'
-    )
-    prices_df = pd.DataFrame(
-        data=[c['open'] for c in candles],
-        index=pd.to_datetime([c['end'] for c in candles]),
-    )
+    if prices_df is None:
+        if verbose:
+            print('Collecting security prices')
+        all_times = options_df.index.get_level_values(level=0)
+        qs = QuestradeSecurities()
+        candles = qs.get_candlesticks(
+            ticker,
+            str(all_times[0]-timedelta(minutes=5)),
+            str(all_times[-1]),
+            'FiveMinutes'
+        )
+        prices_df = pd.DataFrame(
+            data=[c['open'] for c in candles],
+            index=pd.to_datetime([c['end'] for c in candles]),
+        )
 
     for o in ('C', 'P'):
         if verbose:
