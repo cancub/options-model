@@ -52,10 +52,16 @@ def call_put_spread_worker(
         except queue.Empty:
             break
 
+        leg2_strikes = bid_df.columns[bid_df.columns != leg1_strike]
+
         leg1_asks = ask_df[leg1_strike]
 
+        # The second leg cannot include the first leg strike
+        leg2_bid_df = bid_df[leg2_strikes]
+        leg2_ask_df = ask_df[leg2_strikes]
+
         # Figure out how much margin we'd need for this trade
-        open_margins = bid_df.add(leg1_asks, axis='rows')
+        open_margins = leg2_bid_df.add(leg1_asks, axis='rows')
 
         # Pretend that the too-expensive trades don't exist
         if max_margin is not None:
@@ -68,7 +74,7 @@ def call_put_spread_worker(
             # receive from the second.
             # NOTE: leave NaN in place to symbolize that this is not a viable
             #       trade. These trades will be removed at the end.
-            open_credits = bid_df.sub(leg1_asks, axis='rows')
+            open_credits = leg2_bid_df.sub(leg1_asks, axis='rows')
 
             # When looking at the close credits, make sure to replace NaN with 0
             # on the close sides, because NaN implies the trade was worthless.
@@ -77,7 +83,7 @@ def call_put_spread_worker(
             # point).
             # NOTE: make this 0.01 for the leg 2 side since if we want to close
             #       early, we'd actually need to sell it for something.
-            close_credits = (-ask_df.fillna(0.01)).add(
+            close_credits = (-leg2_ask_df.fillna(0.01)).add(
                                 bid_df[leg1_strike].fillna(0), axis='rows')
 
             # Get the forward-looking maximum  profitby reversing the values,
