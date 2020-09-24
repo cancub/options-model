@@ -214,6 +214,7 @@ def sort_trades_df_columns(trades_df):
     # order we want it in
     meta_cols = []
     header_cols = [
+        'description',
         'open_margin',
         'max_profit',
         'stock_price',

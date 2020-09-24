@@ -427,6 +427,17 @@ def filesystem_worker(
                 msg = message
             ))
 
+    def describer(row):
+        otype = 'call' if row.leg1_type == 1 else 'put'
+        if row.leg4_type != 0:
+            strat = '{} butterfly'.format(otype)
+        else:
+            # leg 1 is the buy leg, leg 2 is the second leg
+            # buy < sell := "bull"
+            direction = 'bull' if row.leg1_strike < row.leg2_strike else 'bear'
+            strat = 'vertical {} {}'.format(direction, otype)
+        return strat
+
     def save_piece(spread_list):
         # Get ready to save by building the start of the DataFrame
         df_to_save = pd.concat(spread_list)
@@ -469,6 +480,12 @@ def filesystem_worker(
             else:
                 leg_array = empty_array
             df_to_save.insert(0, 'leg{}_type'.format(i), leg_array)
+
+        log('adding descriptions')
+
+        df_to_save.insert(0,
+                          'description',
+                          df_to_save.apply(describer, axis=1))
 
         log('adding security prices')
 
