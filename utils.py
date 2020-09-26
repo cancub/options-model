@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import uuid
 
 import config
 import trade_processing as tp
@@ -354,45 +355,116 @@ def normalize_metadata_columns(trades_df):
 
     return normalized_df, meta_means, meta_stds
 
-def collect_winners_and_hard_losers(trades_df,
-                                    winning_profit=0,
-                                    l_to_w_ratio=3):
+def build_examples(
+    ticker,
+    total_strategies,
+    max_margin=None,
+    winning_profit=0,
+    total_trades=1*10**6,
+    l_to_w_ratio=3,
+    randomize_legs=False,
+    verbose=False,
+):
+    def log(msg):
+        if verbose:
+            print(msg)
 
-    def get_and_print_wl(df):
-        total_trades = len(df)
+    log('Winning profit: {}'.format(winning_profit * 100))
 
-        # Determine the max profits when purchasing one of these trades
-        profit_less_fees = df.max_profit - calculate_fee()
+    win_fraction = 1/(l_to_w_ratio + 1)
+    required_min_wins = int((total_trades * win_fraction) / total_strategies)
+    required_min_losses = int(
+        (total_trades * (1 - win_fraction)) / total_strategies)
 
-        losers = df[profit_less_fees < winning_profit]
-        winners = df[profit_less_fees >= winning_profit]
-        total_winners = len(winners)
-        total_losers = len(losers)
+    log('Min wins: {}'.format(required_min_wins))
+    log('Min losses: {}'.format(required_min_losses))
 
-        print(
-            '{} ({:.1%}) winners\n{} ({:.1%}) losers\n'.format(
-                total_winners, total_winners / total_trades,
-                total_losers, total_losers / total_trades
-            )
+    strats_dfs = {'win': {}, 'lose': {}}
+
+    # Collect the expiry paths
+    exp_paths = []
+    data_dir = os.path.join(config.ML_DATA_DIR, ticker)
+    exps = (os.path.splitext(f)[0] for f in os.listdir(data_dir)
+                                   if f.endswith('.tar'))
+    for e in exps:
+        exp_paths.append(load_spreads(ticker, e))
+
+    enough_wins = False
+    enough_losses = False
+    loop = 1
+    for df in spreads_tarballs_to_generator(exp_paths):
+        log('{:*^30}'.format(loop))
+        loop += 1
+
+        if max_margin is not None:
+            df = df[df.open_margin <= max_margin]
+        if df.shape[0] == 0:
+            continue
+
+        log('inpecting {} trades of types {}'.format(
+            df.shape[0], sorted(df.description.unique()))
         )
 
-        return winners, losers
+        # Randomize the leg order to make the model more robust
+        if randomize_legs:
+            randomize_legs_columns(df)
 
-    print('Before')
-    winners, losers = get_and_print_wl(trades_df)
+        winning_indices = df.max_profit >= winning_profit
+        for desc in df.description.unique():
+            try:
+                # Only collect as many wins as we need, but keep on collecting
+                # and sorting them for the worst wins (hardest to classify)
+                # until we have enough
+                if not enough_wins:
+                    strats_dfs['win'][desc] = pd.concat((
+                        strats_dfs['win'][desc],
+                        df[(df.description == desc) & winning_indices]
+                    )).sort_values(
+                        by='max_profit', ascending=True)[:required_min_wins]
 
-    # Get at most the desired ratio of losers to winners, using the losers that
-    # were closest to profit
-    losers_to_get = winners.shape[0] * l_to_w_ratio
+                # Ditto for losses, but this time note that we're sorting in the
+                # opposite direction because we want the best losses
+                if not enough_losses:
+                    strats_dfs['lose'][desc] = pd.concat((
+                        strats_dfs['lose'][desc],
+                        df[(df.description == desc) & ~winning_indices]
+                    )).sort_values(
+                        by='max_profit', ascending=False)[:required_min_losses]
 
-    return_df = pd.concat((
-        winners,
-        losers.sort_values(by='max_profit', ascending=False)[:losers_to_get]
-    ))
+            except KeyError:
+                strats_dfs['win'][desc] = df[(
+                    df.description == desc) & winning_indices]
+                strats_dfs['lose'][desc] = df[(
+                    df.description == desc) & ~winning_indices]
 
-    print('After')
-    get_and_print_wl(return_df)
-    return return_df
+        # Are we done yet?
+        min_wins = min((d.shape[0] for d in strats_dfs['win'].values()))
+        min_losses = min((d.shape[0] for d in strats_dfs['lose'].values()))
+        strat_count = len(strats_dfs['win'])
+        log(
+            ('{:>6}: {}\n'
+             '{:>6}: {:>8} ({:.1%})\n'
+             '{:>6}: {:>8} ({:.1%})\n').format(
+                'strats', strat_count,
+                'wins',   min_wins,   min_wins/required_min_wins,
+                'losses', min_losses, min_losses/required_min_losses)
+        )
+        enough_losses = min_losses >= required_min_losses
+        enough_wins = min_wins >= required_min_wins
+        if strat_count == total_strategies and enough_losses and enough_wins:
+            break
+
+    # Concat and save and return the location of the file
+    examples_dir = os.path.join(data_dir, 'examples')
+    if not os.path.exists(examples_dir):
+        os.mkdir(examples_dir)
+    fpath = os.path.join(examples_dir, str(uuid.uuid4()))
+    pd.concat(
+        [d for d in strats_dfs['win'].values()] +
+        [d for d in strats_dfs['lose'].values()]
+    ).to_pickle(fpath)
+
+    return fpath
 
 def calculate_fee(count=1, both_sides=True):
     fee = BASE_FEE + count
