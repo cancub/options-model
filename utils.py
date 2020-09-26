@@ -17,6 +17,28 @@ from tensorflow import keras
 
 BASE_FEE = 9.95
 
+HEADER_COLS = [
+    'description',
+    'open_margin',
+    'max_profit',
+    'stock_price',
+    'minutes_to_expiry'
+]
+
+LEG_COL_NAMES = '''
+    leg{num}_type
+    leg{num}_strike
+    leg{num}_credit
+    leg{num}_volume
+    leg{num}_volatility
+    leg{num}_delta
+    leg{num}_gamma
+    leg{num}_theta
+    leg{num}_vega
+    leg{num}_rho
+    leg{num}_openInterest
+'''
+
 def get_last_backup_path():
     fnames = (b for b in os.listdir(config.BACKUPS_DIR) if b.endswith('.tar'))
     return os.path.abspath(os.path.join(config.BACKUPS_DIR, sorted(fnames)[-1]))
@@ -209,34 +231,18 @@ def get_predictions(
 
     return viable_spreads.sort_values(by=['confidence'], ascending=False)
 
-def sort_trades_df_columns(trades_df):
+def sort_trades_df_columns(df):
     # We don't know what order the data came in wrt columns, but we know the
     # order we want it in
-    meta_cols = []
-    header_cols = [
-        'description',
-        'open_margin',
-        'max_profit',
-        'stock_price',
-        'minutes_to_expiry'
-    ]
-    for col in (c for c in header_cols if c in trades_df.columns):
-        meta_cols.append(col)
-    leg_col_names = '''
-        leg{num}_type
-        leg{num}_strike
-        leg{num}_credit
-        leg{num}_volume
-        leg{num}_volatility
-        leg{num}_delta
-        leg{num}_gamma
-        leg{num}_theta
-        leg{num}_vega
-        leg{num}_rho
-        leg{num}_openInterest
-    '''
+    columns = []
+    for col in (c for c in HEADER_COLS if c in df.columns):
+        columns.append(col)
     for i in [1, 2, 3, 4]:
-        if 'leg{}_type'.format(i) not in trades_df.columns:
+        if 'leg{}_type'.format(i) not in df.columns:
+            break
+        columns += LEG_COL_NAMES.format(num=i).split()
+
+    return df[columns]
             break
         meta_cols += leg_col_names.format(num=i).split()
 
