@@ -191,7 +191,7 @@ def call_put_spread_worker(
     # done
     output_q.put(DONE)
 
-WINDOW = 3
+WINDOW = 0.1
 
 def butterfly_spread_worker(
     id,
@@ -228,8 +228,8 @@ def butterfly_spread_worker(
         # price of the underlying security. Remove this to collect even the
         # weird trades
         viable_times = prices_df[
-            (( (B_strike - WINDOW) < prices_df) &
-               (prices_df < (B_strike + WINDOW) ))[0]
+            (((B_strike - prices_df*WINDOW) < prices_df) &
+               (prices_df < (B_strike + prices_df*WINDOW) ))[0]
         ].index
 
         if viable_times.shape[0] == 0:
