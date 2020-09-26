@@ -191,7 +191,8 @@ def call_put_spread_worker(
     # done
     output_q.put(DONE)
 
-WINDOW = 0.1
+# The percent of the current price
+WINDOW = 0.015
 
 def butterfly_spread_worker(
     id,
