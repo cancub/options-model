@@ -359,6 +359,7 @@ def build_examples(
     randomize_legs=False,
     verbose=False,
 ):
+
     def log(msg):
         if verbose:
             print(msg)
@@ -387,17 +388,11 @@ def build_examples(
     enough_losses = False
     loop = 1
     for df in spreads_tarballs_to_generator(exp_paths):
-        log('{:*^30}'.format(loop))
-        loop += 1
 
         if max_margin is not None:
             df = df[df.open_margin <= max_margin]
         if df.shape[0] == 0:
             continue
-
-        log('inpecting {} trades of types {}'.format(
-            df.shape[0], sorted(df.description.unique()))
-        )
 
         # Randomize the leg order to make the model more robust
         if randomize_legs:
@@ -438,10 +433,13 @@ def build_examples(
         min_losses = min((d.shape[0] for d in strats_dfs['lose'].values()))
         win_count = len(strats_dfs['win'])
         loss_count = len(strats_dfs['lose'])
+
         log(
-            ('{:>6}: {} wins and {} losses\n'
-             '{:>6}: {:>8} ({:.1%})\n'
-             '{:>6}: {:>8} ({:.1%})\n').format(
+            ('{:*^30}\ninpected {} trades of types {}\n'
+            '{:>6}: {} wins and {} losses\n'
+            '{:>6}: {:>8} ({:.1%})\n'
+            '{:>6}: {:>8} ({:.1%})\n').format(
+                loop, df.shape[0], sorted(df.description.unique()),
                 'strats', win_count, loss_count,
                 'wins',   min_wins,   min_wins/required_min_wins,
                 'losses', min_losses, min_losses/required_min_losses)
@@ -452,6 +450,7 @@ def build_examples(
                             and min_wins >= required_min_wins)
         if enough_losses and enough_wins:
             break
+        loop += 1
 
     # Concat and save and return the location of the file
     examples_dir = os.path.join(data_dir, 'examples')
