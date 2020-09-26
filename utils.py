@@ -405,47 +405,52 @@ def build_examples(
 
         winning_indices = df.max_profit >= winning_profit
         for desc in df.description.unique():
-            try:
-                # Only collect as many wins as we need, but keep on collecting
-                # and sorting them for the worst wins (hardest to classify)
-                # until we have enough
-                if not enough_wins:
+            desc_trades = df.description == desc
+            desc_wins   = desc_trades & winning_indices
+            desc_losses = desc_trades & ~winning_indices
+
+            # Only collect as many wins as we need, but keep on collecting
+            # and sorting them for the worst wins (hardest to classify)
+            # until we have enough
+            if not enough_wins:
+                try:
                     strats_dfs['win'][desc] = pd.concat((
-                        strats_dfs['win'][desc],
-                        df[(df.description == desc) & winning_indices]
-                    )).sort_values(
+                        strats_dfs['win'][desc], df[desc_wins])).sort_values(
+                        by='max_profit', ascending=True)[:required_min_wins]
+                except KeyError:
+                    strats_dfs['win'][desc] = df[desc_wins].sort_values(
                         by='max_profit', ascending=True)[:required_min_wins]
 
-                # Ditto for losses, but this time note that we're sorting in the
-                # opposite direction because we want the best losses
-                if not enough_losses:
+            # Ditto for losses, but this time note that we're sorting in the
+            # opposite direction because we want the best losses
+            if not enough_losses:
+                try:
                     strats_dfs['lose'][desc] = pd.concat((
-                        strats_dfs['lose'][desc],
-                        df[(df.description == desc) & ~winning_indices]
+                        strats_dfs['lose'][desc], df[desc_losses]
                     )).sort_values(
                         by='max_profit', ascending=False)[:required_min_losses]
-
-            except KeyError:
-                strats_dfs['win'][desc] = df[(
-                    df.description == desc) & winning_indices]
-                strats_dfs['lose'][desc] = df[(
-                    df.description == desc) & ~winning_indices]
+                except KeyError:
+                    strats_dfs['lose'][desc] = df[desc_losses].sort_values(
+                        by='max_profit', ascending=False)[:required_min_losses]
 
         # Are we done yet?
         min_wins = min((d.shape[0] for d in strats_dfs['win'].values()))
         min_losses = min((d.shape[0] for d in strats_dfs['lose'].values()))
-        strat_count = len(strats_dfs['win'])
+        win_count = len(strats_dfs['win'])
+        loss_count = len(strats_dfs['lose'])
         log(
-            ('{:>6}: {}\n'
+            ('{:>6}: {} wins and {} losses\n'
              '{:>6}: {:>8} ({:.1%})\n'
              '{:>6}: {:>8} ({:.1%})\n').format(
-                'strats', strat_count,
+                'strats', win_count, loss_count,
                 'wins',   min_wins,   min_wins/required_min_wins,
                 'losses', min_losses, min_losses/required_min_losses)
         )
-        enough_losses = min_losses >= required_min_losses
-        enough_wins = min_wins >= required_min_wins
-        if strat_count == total_strategies and enough_losses and enough_wins:
+        enough_losses = (loss_count == total_strategies
+                            and min_losses >= required_min_losses)
+        enough_wins = (win_count == total_strategies
+                            and min_wins >= required_min_wins)
+        if enough_losses and enough_wins:
             break
 
     # Concat and save and return the location of the file
