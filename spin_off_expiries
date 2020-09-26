@@ -50,7 +50,6 @@ with tempfile.TemporaryDirectory() as tmpdir:
             if e.errno != errno.EEXIST:
                 raise
 
-        import pdb; pdb.set_trace()
         # Walk through the old expiries and save them in their own pickles
         for old_exp in before_df.index.unique(level=1).values:
             # It might be that we've picked up data for an expiry that has
