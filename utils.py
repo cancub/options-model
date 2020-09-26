@@ -1,3 +1,4 @@
+from   functools import reduce
 from   io import BytesIO
 import json
 import numpy as np
@@ -26,7 +27,7 @@ HEADER_COLS = [
     'minutes_to_expiry'
 ]
 
-LEG_COL_NAMES = '''
+LEG_COLUMNS_TEMPLATE = '''
     leg{num}_type
     leg{num}_strike
     leg{num}_credit
@@ -39,6 +40,16 @@ LEG_COL_NAMES = '''
     leg{num}_rho
     leg{num}_openInterest
 '''
+
+def _get_column_name_list(shuffle=False):
+    leg_order = list(range(1,config.TOTAL_LEGS + 1))
+    if shuffle:
+        np.random.shuffle(leg_order)
+    return reduce(
+        lambda x, i: x + LEG_COLUMNS_TEMPLATE.format(num=i),
+        leg_order,
+        LEG_COLUMNS_TEMPLATE.format(num=leg_order.pop(0))
+    ).split()
 
 def get_last_backup_path():
     fnames = (b for b in os.listdir(config.BACKUPS_DIR) if b.endswith('.tar'))
@@ -234,32 +245,15 @@ def get_predictions(
 
 def sort_trades_df_columns(df):
     # We don't know what order the data came in wrt columns, but we know the
-    # order we want it in
-    columns = []
-    for col in (c for c in HEADER_COLS if c in df.columns):
-        columns.append(col)
-    for i in [1, 2, 3, 4]:
-        if 'leg{}_type'.format(i) not in df.columns:
-            break
-        columns += LEG_COL_NAMES.format(num=i).split()
-
-    return df[columns]
+    # order we want it in.
+    return df[
+        [c for c in HEADER_COLS if c in df.columns] +_get_column_name_list()]
 
 def randomize_legs_columns(df):
-    # We want to make the model not care about the order in which the legs are
-    # presented to it
-    columns = []
-    for col in (c for c in HEADER_COLS if c in df.columns):
-        columns.append(col)
-
-    legs_order = list(range(1, config.TOTAL_LEGS+1))
-    np.random.shuffle(legs_order)
-    for i in legs_order:
-        if 'leg{}_type'.format(i) not in df.columns:
-            break
-        columns += LEG_COL_NAMES.format(num=i).split()
-
-    df.columns = columns
+    # We want to make the model does not care about the order in which the legs
+    # are presented to it
+    df.columns = [c for c in HEADER_COLS if c in df.columns] + \
+                 _get_column_name_list(shuffle=True)
 
 def set_standard_static_stats(means, variances):
     # Some columns should not be normalized
