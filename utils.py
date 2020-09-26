@@ -243,10 +243,22 @@ def sort_trades_df_columns(df):
         columns += LEG_COL_NAMES.format(num=i).split()
 
     return df[columns]
-            break
-        meta_cols += leg_col_names.format(num=i).split()
 
-    return trades_df[meta_cols]
+def randomize_legs_columns(df):
+    # We want to make the model not care about the order in which the legs are
+    # presented to it
+    columns = []
+    for col in (c for c in HEADER_COLS if c in df.columns):
+        columns.append(col)
+
+    legs_order = list(range(1, config.TOTAL_LEGS+1))
+    np.random.shuffle(legs_order)
+    for i in legs_order:
+        if 'leg{}_type'.format(i) not in df.columns:
+            break
+        columns += LEG_COL_NAMES.format(num=i).split()
+
+    df.columns = columns
 
 def set_standard_static_stats(means, variances):
     # Some columns should not be normalized
