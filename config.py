@@ -23,3 +23,5 @@ MARGIN          = 20
 
 # We're not going to be using this data for training in any case
 IGNORE_LOSS     = 0
+
+TOTAL_LEGS      = 4
