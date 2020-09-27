@@ -106,7 +106,7 @@ def load_spreads(
     return spreads_path
 
 def apply_func_to_dfs_in_tarball(tarball_path, func):
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(prefix='options_func') as tmpdir:
         file_list = extract_and_get_file_list(tarball_path, tmpdir)
         for f in file_list:
             fpath = os.path.join(tmpdir, f)
@@ -244,12 +244,15 @@ def normalize_metadata_columns(trades_df):
 
 def build_examples(
     ticker,
-    total_strategies,
     max_margin=None,
     winning_profit=0,
     total_trades=1*10**6,
-    l_to_w_ratio=3,
+    l_to_w_ratio=1,
     randomize_legs=False,
+    hard_winners=False,
+    win_pool_multiplier=1,
+    hard_losers=True,
+    loss_pool_multiplier=1,
     save_dir=None,
     verbose=False,
 ):
@@ -258,104 +261,164 @@ def build_examples(
         if verbose:
             print(msg)
 
+    def strats_paths_to_generators(strats_paths):
+
+        def strat_paths_to_generator(strat_paths):
+            np.random.shuffle(strat_paths)
+            for p in strat_paths:
+                yield pd.read_pickle(p)
+
+        def path_to_name(p):
+            return os.path.split(p)[1].split('-')[0]
+
+        strats_dicts = {}
+
+        # Walk through the files and append them to their respective list of
+        # strategy DataFrame paths in the dictionary
+        for p in strats_paths:
+            try:
+                strats_dicts[path_to_name(p)].append(p)
+            except KeyError:
+                strats_dicts[path_to_name(p)] = [p]
+
+        return {k: strat_paths_to_generator(v) for k, v in strats_dicts.items()}
+
+    strategy_generators = {}
+    strats_dfs          = {'win': {}, 'loss': {}}
+    enough_wins         = False
+    enough_losses       = False
+
     log('Winning profit: {}'.format(winning_profit * 100))
 
-    win_fraction = 1/(l_to_w_ratio + 1)
-    required_min_wins = int((total_trades * win_fraction) / total_strategies)
-    required_min_losses = int(
-        (total_trades * (1 - win_fraction)) / total_strategies)
-
-    log('Min wins: {}'.format(required_min_wins))
-    log('Min losses: {}'.format(required_min_losses))
-
-    strats_dfs = {'win': {}, 'lose': {}}
-
-    # Collect the expiry paths
-    exp_paths = []
+    # Get the paths to the available spreads tarballs
     data_dir = os.path.join(config.ML_DATA_DIR, ticker)
-    exps = (os.path.splitext(f)[0] for f in os.listdir(data_dir)
-                                   if f.endswith('.tar'))
-    for e in exps:
-        exp_paths.append(load_spreads(ticker, e))
+    tarball_paths = (os.path.join(data_dir, f) for f in os.listdir(data_dir)
+                     if f.endswith('.tar'))
 
-    enough_wins = False
-    enough_losses = False
-    loop = 1
-    for df in spreads_tarballs_to_generator(exp_paths):
+    # Extract all of the available strategy DataFrames for all available
+    # expiries into one directory
+    with tempfile.TemporaryDirectory(prefix='options_examples') as tmpdir:
+        file_list = []
+        for p in tarball_paths:
+            # Extract it and get the file list
+            file_list += list(map(
+                lambda f: os.path.join(tmpdir, f),
+                extract_and_get_file_list(p, tmpdir)
+            ))
 
-        if max_margin is not None:
-            df = df[df.open_margin <= max_margin]
-        if df.shape[0] == 0:
-            continue
+        # Convert each list of strategies into a generator of DataFrames for
+        # that strategy
+        strategy_generators = strats_paths_to_generators(file_list)
 
-        # Randomize the leg order to make the model more robust
-        if randomize_legs:
-            randomize_legs_columns(df)
+        strat_names = list(strategy_generators.keys())
 
-        winning_indices = df.max_profit >= winning_profit
-        for desc in df.description.unique():
-            desc_trades = df.description == desc
-            desc_wins   = desc_trades & winning_indices
-            desc_losses = desc_trades & ~winning_indices
+        # Now that we know the names of the unique strategies, we can count how
+        # many there are ...
+        total_strategies = len(strat_names)
 
-            # Only collect as many wins as we need, but keep on collecting
-            # and sorting them for the worst wins (hardest to classify)
-            # until we have enough
-            if not enough_wins:
+        # ... determine how many winners and losers are needed for each
+        # strategy ...
+        win_frac = 1/(l_to_w_ratio + 1)
+        min_wins = int((total_trades * win_frac) / total_strategies)
+        min_losses = int((total_trades * (1 - win_frac)) / total_strategies)
+
+        win_pool_size = min_wins * \
+            (1 if not hard_winners else win_pool_multiplier)
+        loss_pool_size = min_losses * \
+            (1 if not hard_losers else loss_pool_multiplier)
+
+        log('Min wins: {}'.format(min_wins))
+        log('Min losses: {}'.format(min_losses))
+
+        # ... and prepare the win/loss dictionary with their names.
+        for name in strat_names:
+            strats_dfs['win'][name] = None
+            strats_dfs['loss'][name] = None
+
+        # A little helper function to get a new (win, lose) DataFrame tuple for
+        # a specific strategy
+        def collect_strategy_data(key):
+            df = next(strategy_generators[key])
+
+            if max_margin is not None:
+                df = df[df.open_margin <= max_margin]
+
+            if df.shape[0] == 0:
+                return None, None
+
+            winning_indices = df.max_profit >= winning_profit
+
+            # Randomize the leg order to make the model more robust
+            if randomize_legs:
+                randomize_legs_columns(df)
+
+            return df[winning_indices], df[~winning_indices]
+
+        for strat in strat_names:
+            log('Collecting {}'.format(strat.replace('_', ' ')))
+
+            while True:
+
+                # Figure out which types of trades must be collected
                 try:
-                    strats_dfs['win'][desc] = pd.concat((
-                        strats_dfs['win'][desc], df[desc_wins])).sort_values(
-                        by='max_profit', ascending=True)[:required_min_wins]
-                except KeyError:
-                    strats_dfs['win'][desc] = df[desc_wins].sort_values(
-                        by='max_profit', ascending=True)[:required_min_wins]
-
-            # Ditto for losses, but this time note that we're sorting in the
-            # opposite direction because we want the best losses
-            if not enough_losses:
+                    current_wins = strats_dfs['win'][strat].shape[0]
+                except AttributeError:
+                    current_wins = 0
                 try:
-                    strats_dfs['lose'][desc] = pd.concat((
-                        strats_dfs['lose'][desc], df[desc_losses]
-                    )).sort_values(
-                        by='max_profit', ascending=False)[:required_min_losses]
-                except KeyError:
-                    strats_dfs['lose'][desc] = df[desc_losses].sort_values(
-                        by='max_profit', ascending=False)[:required_min_losses]
+                    current_losses = strats_dfs['loss'][strat].shape[0]
+                except AttributeError:
+                    current_losses = 0
 
-        # Are we done yet?
-        min_wins = min((d.shape[0] for d in strats_dfs['win'].values()))
-        min_losses = min((d.shape[0] for d in strats_dfs['lose'].values()))
-        win_count = len(strats_dfs['win'])
-        loss_count = len(strats_dfs['lose'])
+                enough_wins   = current_wins   >= win_pool_size
+                enough_losses = current_losses >= loss_pool_size
 
-        log(
-            ('{:*^30}\ninpected {} trades of types {}\n'
-            '{:>6}: {} wins and {} losses\n'
-            '{:>6}: {:>8} ({:.1%})\n'
-            '{:>6}: {:>8} ({:.1%})\n').format(
-                loop, df.shape[0], sorted(df.description.unique()),
-                'strats', win_count, loss_count,
-                'wins',   min_wins,   min_wins/required_min_wins,
-                'losses', min_losses, min_losses/required_min_losses)
-        )
-        enough_losses = (loss_count == total_strategies
-                            and min_losses >= required_min_losses)
-        enough_wins = (win_count == total_strategies
-                            and min_wins >= required_min_wins)
-        if enough_losses and enough_wins:
-            break
-        loop += 1
+                if enough_wins and enough_losses:
+                    break
 
-    # Concat and save and return the location of the file
+                strat_wins, strat_losses = collect_strategy_data(strat)
+                if not enough_wins and strat_wins is not None:
+                    strats_dfs['win'][strat] = pd.concat((
+                        strats_dfs['win'][strat], strat_wins))
+                if not enough_losses and strat_losses is not None:
+                    strats_dfs['loss'][strat] = pd.concat((
+                        strats_dfs['loss'][strat], strat_losses))
+
+                try:
+                    total_wins = strats_dfs['win'][strat].shape[0]
+                except AttributeError:
+                    total_wins = 0
+                try:
+                    total_losses = strats_dfs['loss'][strat].shape[0]
+                except AttributeError:
+                    total_losses = 0
+                log('\twins: {:<8} ({:.1%})\tlosses: {:<8} ({:.1%})'.format(
+                    total_wins, total_wins / win_pool_size,
+                    total_losses, total_losses / loss_pool_size))
+
+            # If desired, sort the winners such that they are in order of smallest
+            # max_profit to largest max_profit.
+            if hard_winners:
+                strats_dfs['win'][strat].sort_values(
+                    by='max_profit', ascending=True, inplace=True)
+            strats_dfs['win'][strat] = strats_dfs['win'][strat][:min_wins]
+            # If desired, sort the losers such that they are in order of largest
+            # max_profit to smallest max_profit.
+            if hard_losers:
+                strats_dfs['loss'][strat].sort_values(
+                    by='max_profit', ascending=False, inplace=True)
+            strats_dfs['loss'][strat] = strats_dfs['loss'][strat][:min_losses]
+
+    # Concat all of the DataFrames
     df = pd.concat(
         [d for d in strats_dfs['win'].values()] +
-        [d for d in strats_dfs['lose'].values()]
+        [d for d in strats_dfs['loss'].values()]
     )
+
+    # Save the final examples DataFrame if a directory was specified
     if save_dir is not None:
-        examples_dir = os.path.join(data_dir, 'examples')
-        if not os.path.exists(examples_dir):
-            os.mkdir(examples_dir)
-        fpath = os.path.join(examples_dir, str(uuid.uuid4()))
+        if not os.path.exists(save_dir):
+            os.mkdir(save_dir)
+        fpath = os.path.join(save_dir, str(uuid.uuid4()))
         df.to_pickle(fpath)
 
     return df
