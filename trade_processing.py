@@ -428,22 +428,10 @@ def filesystem_worker(
                 msg = message
             ))
 
-    def describer(row):
-        otype = 'call' if row.leg1_type == 1 else 'put'
-        if row.leg4_type != 0:
-            strat = '{} butterfly'.format(otype)
-        else:
-            # leg 1 is the buy leg, leg 2 is the second leg
-            # buy < sell := "bull"
-            direction = 'bull' if row.leg1_strike < row.leg2_strike else 'bear'
-            strat = 'vertical {} {}'.format(direction, otype)
-        return strat
+    def save_piece(strategy_name, df_to_save):
 
-    def save_piece(spread_list):
-        # Get ready to save by building the start of the DataFrame
-        df_to_save = pd.concat(spread_list)
-
-        log('processing {} spreads'.format(df_to_save.shape[0]))
+        log('processing {} "{}" spreads'.format(
+                df_to_save.shape[0], strategy_name))
 
         if get_max_profit:
             if winning_profit is not None and loss_win_ratio is not None:
@@ -464,29 +452,6 @@ def filesystem_worker(
             if ignore_loss is not None:
                 # Don't bother with trades we won't be using for training
                 df_to_save = df_to_save[df_to_save[1] > ignore_loss]
-
-        # Update the count
-        trades_in_memory = df_to_save.shape[0]
-
-        log('saving {} spreads'.format(trades_in_memory))
-
-        # Add in a column showing which option type was in use for each leg.
-        # Use the values of 1 and -1 to that 0 can be used to signify an empty
-        # leg when working with the model
-        type_array = np.ones(trades_in_memory)
-        empty_array = np.zeros(trades_in_memory)
-        for i in [1, 2, 3, 4]:
-            if df_to_save['leg{}_strike'.format(i)].iloc[0] != 0:
-                leg_array = (-1 if option_type == 'P' else 1) * type_array
-            else:
-                leg_array = empty_array
-            df_to_save.insert(0, 'leg{}_type'.format(i), leg_array)
-
-        log('adding descriptions')
-
-        df_to_save.insert(0,
-                          'description',
-                          df_to_save.apply(describer, axis=1))
 
         log('adding security prices')
 
@@ -524,14 +489,32 @@ def filesystem_worker(
             (epoch_expiry - epoch_opens).apply(lambda x: x.total_seconds())//60
         )
 
-        filepath = os.path.join(working_dir, '{}.bz2'.format(uuid.uuid4()))
+        # Make sure that the filename includes the strategy type so that we can
+        # reference this without opening up the DataFrame
+        filepath = os.path.join(
+            working_dir,
+            '{name}-{id}.bz2'.format(
+                name=strategy_name.replace(' ', '_'),
+                id=uuid.uuid4().hex
+            )
+        )
         log('saving to {}'.format(filepath))
         df_to_save.reset_index(drop=True).to_pickle(filepath)
 
+    def describer(row):
+        otype = 'call' if row.leg1_type == 1 else 'put'
+        if row.leg4_type != 0:
+            strat = '{} butterfly'.format(otype)
+        else:
+            # leg 1 is the buy leg, leg 2 is the second leg
+            # buy < sell := "bull"
+            direction = 'bull' if row.leg1_strike < row.leg2_strike else 'bear'
+            strat = 'vertical {} {}'.format(direction, otype)
+        return strat
+
     log('START')
 
-    trades_in_memory = 0
-    spread_list = []
+    strategy_spreads = {}
     while True:
         # Grab a strike for the leg we will be longing.
         item = input_q.get()
@@ -541,24 +524,46 @@ def filesystem_worker(
             log('Got {} signal from other side. Quitting.'.format(DONE))
             break
 
-        # Add this DataFrame to the list and update the count
-        trades_in_memory += item.shape[0]
-        spread_list.append(item)
+        # Add in a column showing which option type was in use for each leg.
+        # Use the values of 1 and -1 to that 0 can be used to signify an empty
+        # leg when working with the model
+        type_array = np.ones(item.shape[0])
+        empty_array = np.zeros(item.shape[0])
+        for i in range(1, config.TOTAL_LEGS + 1):
+            if item['leg{}_strike'.format(i)].iloc[0] != 0:
+                leg_array = (-1 if option_type == 'P' else 1) * type_array
+            else:
+                leg_array = empty_array
+            item.insert(0, 'leg{}_type'.format(i), leg_array)
 
-        if trades_in_memory < max_spreads:
-            continue
+        # Add descriptions to the rows
+        item.insert(0, 'description', item.apply(describer, axis=1))
 
-        # The buffer has hit critical mass, so dump it into a new file
-        save_piece(spread_list)
+        # Separate the item into DataFrames for each strategy
+        for d in item.description.unique():
+            strategy_spreads[d] = pd.concat((
+                strategy_spreads.get(d, None), item[item.description == d]))
 
-        # Reset the values and start filling up the buffer again
-        spread_list = []
-        trades_in_memory = 0
+        for strategy, df in strategy_spreads.items():
+            if df is None or df.shape[0] < max_spreads:
+                continue
+
+            # The buffer for this strategy has hit critical mass, so dump it
+            # into a new file
+            save_piece(strategy, df)
+
+            # Reset the values and start filling up the buffer again
+            strategy_spreads[strategy] = None
 
     # We're quitting, but we still need to check if there's anything in the
     # buffer to dump before quitting
-    if trades_in_memory > 0:
-        save_piece(spread_list)
+    for strategy, df in strategy_spreads.items():
+        if df is None:
+            continue
+
+        # The buffer for this strategy has hit critical mass, so dump it
+        # into a new file
+        save_piece(strategy, df)
 
     log('COMPLETE')
 
