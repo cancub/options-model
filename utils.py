@@ -335,6 +335,7 @@ def build_examples(
     total_trades=1*10**6,
     l_to_w_ratio=3,
     randomize_legs=False,
+    save_dir=None,
     verbose=False,
 ):
 
@@ -431,16 +432,18 @@ def build_examples(
         loop += 1
 
     # Concat and save and return the location of the file
-    examples_dir = os.path.join(data_dir, 'examples')
-    if not os.path.exists(examples_dir):
-        os.mkdir(examples_dir)
-    fpath = os.path.join(examples_dir, str(uuid.uuid4()))
-    pd.concat(
+    df = pd.concat(
         [d for d in strats_dfs['win'].values()] +
         [d for d in strats_dfs['lose'].values()]
-    ).to_pickle(fpath)
+    )
+    if save_dir is not None:
+        examples_dir = os.path.join(data_dir, 'examples')
+        if not os.path.exists(examples_dir):
+            os.mkdir(examples_dir)
+        fpath = os.path.join(examples_dir, str(uuid.uuid4()))
+        df.to_pickle(fpath)
 
-    return fpath
+    return df
 
 def calculate_fee(count=1, both_sides=True):
     fee = config.BASE_FEE + count
