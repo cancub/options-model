@@ -127,7 +127,7 @@ def spreads_tarballs_to_generator(tarball_paths, shuffle=True):
     # First we need to get a list of all of the files to be loaded
     if not isinstance(tarball_paths, list):
         tarball_paths = [tarball_paths]
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(prefix='spreads_gen') as tmpdir:
         paths = []
         for p in tarball_paths:
             file_list = extract_and_get_file_list(p, tmpdir)
