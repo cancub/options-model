@@ -25,3 +25,25 @@ MARGIN          = 20
 IGNORE_LOSS     = 0
 
 TOTAL_LEGS      = 4
+
+BASE_FEE        = 9.95
+
+HEADER_COLS     = ['description',
+                   'open_margin',
+                   'max_profit',
+                   'stock_price',
+                   'minutes_to_expiry']
+
+LEG_COLUMNS_TEMPLATE = '''
+    leg{num}_type
+    leg{num}_strike
+    leg{num}_credit
+    leg{num}_volume
+    leg{num}_volatility
+    leg{num}_delta
+    leg{num}_gamma
+    leg{num}_theta
+    leg{num}_vega
+    leg{num}_rho
+    leg{num}_openInterest
+'''

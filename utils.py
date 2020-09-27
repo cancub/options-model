@@ -17,38 +17,14 @@ import trade_processing as tp
 
 from tensorflow import keras
 
-BASE_FEE = 9.95
-
-HEADER_COLS = [
-    'description',
-    'open_margin',
-    'max_profit',
-    'stock_price',
-    'minutes_to_expiry'
-]
-
-LEG_COLUMNS_TEMPLATE = '''
-    leg{num}_type
-    leg{num}_strike
-    leg{num}_credit
-    leg{num}_volume
-    leg{num}_volatility
-    leg{num}_delta
-    leg{num}_gamma
-    leg{num}_theta
-    leg{num}_vega
-    leg{num}_rho
-    leg{num}_openInterest
-'''
-
 def _get_column_name_list(shuffle=False):
     leg_order = list(range(1,config.TOTAL_LEGS + 1))
     if shuffle:
         np.random.shuffle(leg_order)
     return reduce(
-        lambda x, i: x + LEG_COLUMNS_TEMPLATE.format(num=i),
+        lambda x, i: x + config.LEG_COLUMNS_TEMPLATE.format(num=i),
         leg_order,
-        LEG_COLUMNS_TEMPLATE.format(num=leg_order.pop(0))
+        config.LEG_COLUMNS_TEMPLATE.format(num=leg_order.pop(0))
     ).split()
 
 def get_last_backup_path():
@@ -247,12 +223,14 @@ def sort_trades_df_columns(df):
     # We don't know what order the data came in wrt columns, but we know the
     # order we want it in.
     return df[
-        [c for c in HEADER_COLS if c in df.columns] +_get_column_name_list()]
+        [c for c in config.HEADER_COLS if c in df.columns] +
+        _get_column_name_list()
+    ]
 
 def randomize_legs_columns(df):
     # We want to make the model does not care about the order in which the legs
     # are presented to it
-    df.columns = [c for c in HEADER_COLS if c in df.columns] + \
+    df.columns = [c for c in config.HEADER_COLS if c in df.columns] + \
                  _get_column_name_list(shuffle=True)
 
 def set_standard_static_stats(means, variances):
@@ -465,7 +443,7 @@ def build_examples(
     return fpath
 
 def calculate_fee(count=1, both_sides=True):
-    fee = BASE_FEE + count
+    fee = config.BASE_FEE + count
     if both_sides:
         fee *= 2
     return fee / 100
