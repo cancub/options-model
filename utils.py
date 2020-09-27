@@ -8,14 +8,11 @@ import random
 import re
 import shutil
 import subprocess
-import tarfile
 import tempfile
 import uuid
 
 import config
 import trade_processing as tp
-
-from tensorflow import keras
 
 def _get_column_name_list(shuffle=False):
     leg_order = list(range(1,config.TOTAL_LEGS + 1))
@@ -136,88 +133,6 @@ def spreads_tarballs_to_generator(tarball_paths, shuffle=True):
             random.shuffle(paths)
         for p in paths:
             yield sort_trades_df_columns(pd.read_pickle(p))
-
-def load_best_model(ticker, max_margin=np.inf, min_profit = 0):
-    # Find the model related to these values which has the lowest loss
-    model_dir = os.path.join(config.ML_MODELS_DIR, ticker)
-    best_model_tarball = None
-    lowest_loss = np.inf
-    for fname in (f for f in os.listdir(model_dir) if f.endswith('.tar')):
-        fpath = os.path.join(model_dir, fname)
-
-        # Get the metadata
-        meta = json.loads(
-            subprocess.check_output(['tar', '-xOf', fpath, 'metadata']))
-
-        # Check the criteria
-        if (meta['max_margin'] < max_margin
-                or meta['min_profit'] != min_profit
-                or meta['loss'] >= lowest_loss):
-            continue
-        lowest_loss = meta['loss']
-        best_model_tarball = fpath
-
-    # Load the model and statistics from the tarball
-    model_tarball = tarfile.open(best_model_tarball)
-    with tempfile.TemporaryDirectory() as tmpdir:
-
-        # Extract the model into a temporary directory
-        model_tarball.extractall(tmpdir)
-
-        # Load the model
-        model = keras.models.load_model(
-            os.path.join(tmpdir, 'checkpoint'), compile=False)
-
-        # Load the stats
-        means = pd.read_pickle(os.path.join(tmpdir, 'means'))
-        stds = pd.read_pickle(os.path.join(tmpdir, 'variances')).pow(1/2)
-
-        with open(os.path.join(tmpdir, 'metadata'), 'r') as MF:
-            metadata = json.load(MF)
-
-    return {
-        'model': model,
-        'means': means,
-        'stds': stds,
-        'metadata': metadata
-    }
-
-def get_predictions(
-    viable_spreads,
-    options_model=None,
-    ticker=None,
-    max_margin=np.inf,
-    min_profit=0
-):
-
-    if options_model is None:
-        options_model = load_best_model(ticker, max_margin=np.inf, min_profit=0)
-
-    model = options_model['model']
-    means = options_model['means']
-    stds = options_model['stds']
-    columns_order = options_model['metadata']['feature_order']
-
-    # We need to compile to continue
-    model.compile(
-        loss=keras.losses.BinaryCrossentropy(from_logits=True))
-
-    # Maybe we got the margin or profits in with the spreads. These were not
-    # provided to the model and so they must be removed
-    examples = viable_spreads[columns_order]
-
-    # Make sure we have the right columns in the right order
-    means = means[columns_order]
-    stds = stds[columns_order]
-
-    # Normalize
-    examples = (examples - means) / stds
-
-    # Get the predictions
-    results = model.predict(examples.values)
-    viable_spreads.insert(0, 'confidence', results)
-
-    return viable_spreads.sort_values(by=['confidence'], ascending=False)
 
 def sort_trades_df_columns(df):
     # We don't know what order the data came in wrt columns, but we know the
