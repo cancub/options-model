@@ -230,18 +230,6 @@ def pool_stats_from_expiry(expiry_path):
     # pooled values with other pooled values later on
     return pooled_means, pooled_vars, total_samples, pool_count
 
-def normalize_metadata_columns(trades_df):
-    # We must not normalize the leg types since these columns are categorical.
-    # So we give these specific columns mean 0 std 1 to make them unchanged
-    # after the normalization operation
-    meta_means, meta_vars = collect_statistics(trades_df)
-
-    meta_stds = meta_vars.pow(1/2)
-
-    normalized_df = (trades_df - meta_means) / meta_stds
-
-    return normalized_df, meta_means, meta_stds
-
 def build_examples(
     ticker,
     max_margin=None,
