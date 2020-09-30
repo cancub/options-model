@@ -138,6 +138,12 @@ def spreads_tarballs_to_generator(tarball_paths, count=None, shuffle=True):
                 if count == 0:
                     break
 
+def ticker_expiry_to_generator(ticker, expiry, count=None, shuffle=True):
+    # First we need to get a list of all of the files to be loaded
+    return spreads_tarballs_to_generator(load_spreads(ticker, expiry),
+                                         count,
+                                         shuffle)
+
 def sort_trades_df_columns(df):
     # We don't know what order the data came in wrt columns, but we know the
     # order we want it in.
