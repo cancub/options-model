@@ -120,7 +120,7 @@ def extract_and_get_file_list(tarball_path, output_dir):
         ['tar', '-C', output_dir, '-xvf', tarball_path])
     return sorted(files_bytes.decode('utf-8').strip().split('\n'))
 
-def spreads_tarballs_to_generator(tarball_paths, shuffle=True):
+def spreads_tarballs_to_generator(tarball_paths, count=None, shuffle=True):
     # First we need to get a list of all of the files to be loaded
     if not isinstance(tarball_paths, list):
         tarball_paths = [tarball_paths]
@@ -133,6 +133,10 @@ def spreads_tarballs_to_generator(tarball_paths, shuffle=True):
             random.shuffle(paths)
         for p in paths:
             yield sort_trades_df_columns(pd.read_pickle(p))
+            if count != None:
+                count -= 1
+                if count == 0:
+                    break
 
 def sort_trades_df_columns(df):
     # We don't know what order the data came in wrt columns, but we know the
