@@ -1,4 +1,6 @@
+from   datetime import datetime, timezone
 import os
+import pytz
 
 STORAGE_DIR     = os.path.abspath('./pickles')
 BACKUPS_DIR     = os.path.abspath('./backups')
@@ -47,3 +49,7 @@ LEG_COLUMNS_TEMPLATE = '''
     leg{num}_rho
     leg{num}_openInterest
 '''
+
+EPOCH = datetime(1970, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+DST_TRANSITIONS = pytz.timezone('America/Toronto')._utc_transition_times

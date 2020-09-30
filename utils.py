@@ -1,9 +1,11 @@
+from   datetime import datetime, timedelta, timezone
 from   functools import reduce
 from   io import BytesIO
 import json
 import numpy as np
 import os
 import pandas as pd
+import pytz
 import random
 import re
 import shutil
@@ -13,6 +15,8 @@ import uuid
 
 import config
 import trade_processing as tp
+
+from questrade_helpers import QuestradeSecurities
 
 def _get_column_name_list(shuffle=False):
     leg_order = list(range(1,config.TOTAL_LEGS + 1))
@@ -426,3 +430,31 @@ def calculate_fee(count=1, both_sides=True):
     if both_sides:
         fee *= 2
     return fee / 100
+
+def get_security_prices(ticker, start_dt, end_dt, frequency):
+    qs = QuestradeSecurities()
+    candles = qs.get_candlesticks(ticker, str(start_dt), str(end_dt), frequency)
+    return pd.DataFrame(
+        data=[c['open'] for c in candles],
+        index=pd.to_datetime([c['end'] for c in candles]),
+    )
+
+def date_string_to_expiry(date_string):
+    # All expiries are actually ay 4 pm on the day of expiry
+    return datetime.strptime(date_string, '%Y-%m-%d') + timedelta(hours=16)
+
+def get_eastern_tz(dt):
+    transition = next(t for t in config.DST_TRANSITIONS if t.date() > dt.date())
+    return timezone(timedelta(hours=-4 if transition.month > 9 else -5))
+
+def add_eastern_tz(dt):
+    return dt.replace(tzinfo=get_eastern_tz(dt))
+
+def get_epoch_timedelta(dt):
+    return dt.astimezone(timezone.utc) - config.EPOCH
+
+def expiry_string_to_epoch_delta(date_string):
+    return get_epoch_timedelta(            # How far from Jan 1, 1970 is this?
+                add_eastern_tz(            # Add the timezone
+                    date_string_to_expiry( # Datetime for at 4pm close
+                        date_string)))

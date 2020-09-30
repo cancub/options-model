@@ -8,9 +8,8 @@ import queue
 import tempfile
 import uuid
 
-from questrade_helpers import QuestradeSecurities
-
 import config
+import utils
 
 DONE = 'finished'
 
@@ -409,7 +408,6 @@ def filesystem_worker(
     input_q,
     working_dir,
     ticker,
-    epoch,
     epoch_expiry,
     prices_df,
     max_spreads,
@@ -479,8 +477,7 @@ def filesystem_worker(
         log('converting open time to minutes to expiry')
 
         # Get the opens as a UTC timedelta
-        epoch_opens = df_to_save.open_time.apply(
-            lambda x: x.astimezone(timezone.utc) - epoch)
+        epoch_opens = df_to_save.open_time.apply(utils.get_epoch_timedelta)
 
         df_to_save.drop('open_time', axis=1, inplace=True)
         df_to_save.insert(
@@ -592,34 +589,19 @@ def collect_spreads(
     # And the threads will put their resulting DataFrames into this queue
     working_q = multiprocessing.Queue()
 
-    # Get the expiry in seconds from epoch
-    epoch = datetime(1970, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    expiry_dt = datetime.strptime(expiry, '%Y-%m-%d') + timedelta(hours=16)
-
-    # Add the time zone (is the next change in the fall or spring?)
-    transitions = pytz.timezone('America/Toronto')._utc_transition_times
-    dst = next(t for t in transitions if t > expiry_dt).month > 9
-    expiry_dt = expiry_dt.replace(
-        tzinfo=timezone(timedelta(hours=-4 if dst else -5)))
-
-    # Get the epxiry as a UTC timedelta
-    epoch_expiry = expiry_dt - epoch
+    # Get the expiry as a UTC timedelta from epoch to the 4 pm closing bell
+    epoch_expiry = utils.expiry_string_to_epoch_delta(expiry)
 
     # Get the full set of prices that occured during this dataframe
     if prices_df is None:
         if verbose:
             print('Collecting security prices')
         all_times = options_df.index.get_level_values(level=0)
-        qs = QuestradeSecurities()
-        candles = qs.get_candlesticks(
-            ticker,
-            str(all_times[0]-timedelta(minutes=5)),
-            str(all_times[-1]),
-            'FiveMinutes'
-        )
-        prices_df = pd.DataFrame(
-            data=[c['open'] for c in candles],
-            index=pd.to_datetime([c['end'] for c in candles]),
+        prices_df = utils.get_security_prices(
+            ticker    = ticker,
+            start_dt  = all_times[0]-timedelta(minutes=5),
+            end_dt    = all_times[-1],
+            frequency = 'FiveMinutes'
         )
 
     for o in ('C', 'P'):
@@ -663,7 +645,6 @@ def collect_spreads(
                               working_q,
                               tmpdir,
                               ticker,
-                              epoch,
                               epoch_expiry,
                               prices_df,
                               max_spreads_per_file,
