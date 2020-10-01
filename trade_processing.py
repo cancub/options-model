@@ -479,7 +479,6 @@ def filesystem_worker(
         # Get the opens as a UTC timedelta
         epoch_opens = df_to_save.open_time.apply(utils.get_epoch_timedelta)
 
-        df_to_save.drop('open_time', axis=1, inplace=True)
         df_to_save.insert(
             0,
             'minutes_to_expiry',

@@ -34,6 +34,7 @@ HEADER_COLS     = ['description',
                    'open_margin',
                    'max_profit',
                    'stock_price',
+                   'open_time',
                    'minutes_to_expiry']
 
 LEG_COLUMNS_TEMPLATE = '''
