@@ -450,11 +450,12 @@ def get_eastern_tz(dt):
 def add_eastern_tz(dt):
     return dt.replace(tzinfo=get_eastern_tz(dt))
 
-def get_epoch_timedelta(dt):
-    return dt.astimezone(timezone.utc) - config.EPOCH
+def get_epoch_timestamp(dt):
+    return (dt.astimezone(timezone.utc) - config.EPOCH).total_seconds()
 
-def expiry_string_to_epoch_delta(date_string):
-    return get_epoch_timedelta(            # How far from Jan 1, 1970 is this?
+def expiry_string_to_epoch_timestamp(date_string):
+    return get_epoch_timestamp(            # How far from Jan 1, 1970 is this?
                 add_eastern_tz(            # Add the timezone
                     date_string_to_expiry( # Datetime for at 4pm close
                         date_string)))
+
