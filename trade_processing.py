@@ -408,7 +408,7 @@ def filesystem_worker(
     input_q,
     working_dir,
     ticker,
-    epoch_expiry,
+    expiry_dt,
     prices_df,
     max_spreads,
     option_type,
@@ -473,17 +473,7 @@ def filesystem_worker(
             df_to_save['stock_price'] = prices_df.loc[
                 df_to_save.open_time].values[:, 0]
 
-        # Convert open_time to minutes_to_expiry, paying attention to timezones
-        log('converting open time to minutes to expiry')
-
-        # Get the opens as a UTC timedelta
-        epoch_opens = df_to_save.open_time.apply(utils.get_epoch_timedelta)
-
-        df_to_save.insert(
-            0,
-            'minutes_to_expiry',
-            (epoch_expiry - epoch_opens).apply(lambda x: x.total_seconds())//60
-        )
+        df_to_save.insert(0, 'expiry', expiry_dt)
 
         # Make sure that the filename includes the strategy type so that we can
         # reference this without opening up the DataFrame
@@ -498,8 +488,8 @@ def filesystem_worker(
         df_to_save.reset_index(drop=True).to_pickle(filepath)
 
     def describer(row):
-        otype = 'call' if row.leg1_type == 1 else 'put'
-        if row.leg4_type != 0:
+        otype = 'call' if row.leg1_type == 'C' else 'put'
+        if isinstance(row.leg4_type, str):
             strat = '{} butterfly'.format(otype)
         else:
             # leg 1 is the buy leg, leg 2 is the second leg
@@ -520,17 +510,13 @@ def filesystem_worker(
             log('Got {} signal from other side. Quitting.'.format(DONE))
             break
 
-        # Add in a column showing which option type was in use for each leg.
-        # Use the values of 1 and -1 to that 0 can be used to signify an empty
-        # leg when working with the model
-        type_array = np.ones(item.shape[0])
-        empty_array = np.zeros(item.shape[0])
         for i in range(1, config.TOTAL_LEGS + 1):
-            if item['leg{}_strike'.format(i)].iloc[0] != 0:
-                leg_array = (-1 if option_type == 'P' else 1) * type_array
-            else:
-                leg_array = empty_array
-            item.insert(0, 'leg{}_type'.format(i), leg_array)
+            item.insert(
+                0,
+                'leg{}_type'.format(i),
+                option_type if item['leg{}_strike'.format(i)].iloc[0] != 0
+                            else np.nan
+            )
 
         # Add descriptions to the rows
         item.insert(0, 'description', item.apply(describer, axis=1))
@@ -588,8 +574,8 @@ def collect_spreads(
     # And the threads will put their resulting DataFrames into this queue
     working_q = multiprocessing.Queue()
 
-    # Get the expiry as a UTC timedelta from epoch to the 4 pm closing bell
-    epoch_expiry = utils.expiry_string_to_epoch_delta(expiry)
+    # Get the expiry as an aware datetime at the 4 pm closing bell
+    expiry_dt = utils.expiry_string_to_aware_datetime(expiry)
 
     # Get the full set of prices that occured during this dataframe
     if prices_df is None:
@@ -644,7 +630,7 @@ def collect_spreads(
                               working_q,
                               tmpdir,
                               ticker,
-                              epoch_expiry,
+                              expiry_dt,
                               prices_df,
                               max_spreads_per_file,
                               o,

@@ -453,9 +453,5 @@ def add_eastern_tz(dt):
 def get_epoch_timestamp(dt):
     return (dt.astimezone(timezone.utc) - config.EPOCH).total_seconds()
 
-def expiry_string_to_epoch_timestamp(date_string):
-    return get_epoch_timestamp(            # How far from Jan 1, 1970 is this?
-                add_eastern_tz(            # Add the timezone
-                    date_string_to_expiry( # Datetime for at 4pm close
-                        date_string)))
-
+def expiry_string_to_aware_datetime(date_string):
+    return add_eastern_tz(date_string_to_expiry(date_string))
