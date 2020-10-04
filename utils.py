@@ -139,8 +139,18 @@ def add_timestamp_columns(df):
         )
     )
 
+def add_options_type_categories(df):
+    option_val = 1 if df.iloc[0].leg1_type == 'C' else -1
+    for i in range(1, config.TOTAL_LEGS + 1):
+        df.insert(
+            0,
+            'leg{}_type_cat'.format(i),
+            option_val if df['leg{}_strike'.format(i)].iloc[0] != 0 else 0
+        )
+
 def process_trades_df(df):
     add_timestamp_columns(df)
+    add_options_type_categories(df)
     return sort_trades_df_columns(df)
 
 def spreads_tarballs_to_generator(tarball_paths, count=None, shuffle=True):
@@ -184,15 +194,9 @@ def randomize_legs_columns(df):
                  _get_column_name_list(shuffle=True)
 
 def set_standard_static_stats(means, variances):
-    # Some columns should not be normalized
-    columns = means.index.values
-    static_columns = ['open_margin', 'max_profit']
-    for i in [1, 2, 3, 4]:
-        type_col = 'leg{}_type'.format(i)
-        if type_col in columns:
-            static_columns.append(type_col)
-
-    for c in static_columns:
+    # Leg type category columns should not be normalized
+    cat_tmp = 'leg{}_type_cat'
+    for c in (cat_tmp.format(i) for i in range(1, config.TOTAL_LEGS + 1)):
         try:
             means[c] = 0
             variances[c] = 1
