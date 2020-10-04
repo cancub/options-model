@@ -472,7 +472,7 @@ def add_eastern_tz(dt):
     return dt.replace(tzinfo=get_eastern_tz(dt))
 
 def get_epoch_timestamp(dt):
-    return (dt.astimezone(timezone.utc) - config.EPOCH).total_seconds()
+    return int((dt.astimezone(timezone.utc) - config.EPOCH).total_seconds())
 
 def expiry_string_to_aware_datetime(date_string):
     return add_eastern_tz(date_string_to_expiry(date_string))
