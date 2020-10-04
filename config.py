@@ -31,12 +31,14 @@ TOTAL_LEGS      = 4
 BASE_FEE        = 9.95
 
 HEADER_COLS     = [
-    'expiry',
     'description',
+    'expiry',
+    'expiry_timestamp',
+    'open_time',
+    'seconds_to_expiry',
+    'stock_price',
     'open_margin',
     'max_profit',
-    'stock_price',
-    'open_time',
 ]
 
 LEG_COLUMNS_TEMPLATE = '''
