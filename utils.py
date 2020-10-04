@@ -237,7 +237,18 @@ def pool_stats_from_expiry(expiry_path):
 
     # Get the stats for each DataFrame in the expiry tarball
     for df in spreads_tarballs_to_generator(expiry_path, shuffle=True):
-        df_means, df_vars = collect_statistics(df)
+        # Only collect statistics for values that willl be used for training
+        columns = df.columns.drop(['expiry',
+                                   'open_time',
+                                   'description',
+                                   'open_margin',
+                                   'max_profit'])
+        # This also means removing the string versions of option types. The
+        # category values have been added in.
+        columns = columns.drop(
+            ['leg{}_type'.format(i) for i in range(1, config.TOTAL_LEGS + 1)])
+
+        df_means, df_vars = collect_statistics(df[columns])
         means.append(df_means)
         variances.append(df_vars)
         sample_sizes.append(df.shape[0])
