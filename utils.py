@@ -455,3 +455,102 @@ def get_epoch_timestamp(dt):
 
 def expiry_string_to_aware_datetime(date_string):
     return add_eastern_tz(date_string_to_expiry(date_string))
+
+def describe_wins(wins_df, winning_profit, ticker):
+    expiry_options = {e: load_options(ticker, str(e.date()))
+                        for e in wins_df.expiry.unique()}
+    profit_details = {
+        'open_to_first_profit': [],
+        'first_profit_to_expiry': [],
+        'profitable_at_expiry': [],
+        'profitable_periods': [],
+        'min_profitable_time': [],
+        'median_profitable_time': [],
+        'max_profitable_time': [],
+        'total_profitable_time': []
+    }
+
+    one_min = timedelta(minutes=1)
+
+    for index, row in wins_df.iterrows():
+        print(index)
+
+        row_open = row.open_time
+        row_exp = row.expiry
+
+        # Get the bid and ask prices for this specific expiry and option type.
+        # Additionally, ignore any times at or before the open time and any
+        # times after the expiry when considering closes.
+        close_options = expiry_options[row_exp].xs(
+            row.leg1_type, level=1
+        ).loc[row_open + one_min: row_exp + one_min, ('bidPrice', 'askPrice')]
+
+        credits = 0
+        for i in range(1, config.TOTAL_LEGS + 1):
+            strike = row['leg{}_strike'.format(i)]
+            if strike == 0:
+                continue
+            price_df = close_options.xs(strike, level=1)
+            leg_open_credit = row['leg{}_credit'.format(i)]
+
+            if leg_open_credit > 0:
+                # We sold this leg to start
+                leg_close_credits = -price_df.askPrice.fillna(0.01)
+            else:
+                # We bought this leg to start
+                leg_close_credits = price_df.bidPrice.fillna(0)
+
+            credits += leg_close_credits + leg_open_credit
+
+        # Sanity check to see that we arrived at the same conclusion as the
+        # spreads collector
+        assert(np.isclose(credits.max(), row.max_profit))
+
+        profitable = ((credits > winning_profit)
+                      | np.isclose(credits, winning_profit))
+
+        # This function only accepts winning trades for the time being
+        assert(profitable.sum() > 0)
+
+        # Find first point of profitability and how it relates to the open and
+        # expiry times
+        first_profit = profitable.index[profitable][0]
+        profit_details['open_to_first_profit'].append(first_profit - row_open)
+        profit_details['first_profit_to_expiry'].append(row_exp - first_profit)
+
+        # It's important to know that we could hold on to this trade and profit
+        # just by letting it expire
+        profitable_at_expiry = profitable[-1]
+        profit_details['profitable_at_expiry'].append(profitable_at_expiry)
+
+        # Find the transitions
+        current_is_p = profitable[:-1].values
+        next_is_p = profitable[1:].values
+        transitions_up = profitable.index[1:][~current_is_p & next_is_p]
+        transitions_down = profitable.index[1:][current_is_p & ~next_is_p]
+
+        # Fill in the blanks depends on whether or not this was profitable at
+        # the first possible sell point and/or if it was profitable at expiry
+        if profitable[0]:
+            transitions_up = sorted(
+                transitions_up.append(pd.DatetimeIndex([row_open])))
+        if profitable_at_expiry:
+            transitions_down = sorted(
+                transitions_down.append(pd.DatetimeIndex([row_exp])))
+
+        # Find the periods in which this trade was profitable
+        profitable_periods = []
+        for i in range(len(transitions_up)):
+            profitable_periods.append(transitions_down[i] - transitions_up[i])
+
+        # Stats on profitable periods
+        profit_details['profitable_periods'].append(len(profitable_periods))
+        profit_details['min_profitable_time'].append(np.min(profitable_periods))
+        profit_details['median_profitable_time'].append(
+            np.median(profitable_periods))
+        profit_details['max_profitable_time'].append(
+            np.max(profitable_periods))
+        profit_details['total_profitable_time'].append(
+            np.sum(profitable_periods))
+
+    return pd.concat((wins_df, pd.DataFrame(profit_details)), axis = 1)
