@@ -55,8 +55,7 @@ for ticker in tickers:
     print('Missing stats: {}'.format(to_add))
 
     # Gather the data on these missing expiries
-    new_stats_df_list = []
-    for exp in to_add:
+    for exp in sorted(to_add):
         print('Adding stats for {}'.format(exp))
         exp_spreads_path = os.path.join(spread_dir, '{}.tar'.format(exp))
         means, variances, samples, pools = utils.pool_stats_from_expiry(
@@ -72,14 +71,6 @@ for ticker in tickers:
         base_df.insert(0, 'samples', [samples, samples])
         base_df.insert(0, 'pools', [pools, pools])
 
-        # Add this data to the stats DataFrame
-        new_stats_df_list.append(base_df)
-
-    # Concatenate all of the new stats as with the current stats
-    if stats_df is not None:
-        stats_df = pd.concat([stats_df] + new_stats_df_list)
-    else:
-        stats_df = pd.concat(new_stats_df_list)
-
-    # Save the stats file
-    stats_df.to_pickle(spread_stats_df_path)
+        # Add this data to the stats DataFrame and save it
+        stats_df = pd.concat((stats_df, base_df))
+        stats_df.to_pickle(spread_stats_df_path)
