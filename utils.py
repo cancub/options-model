@@ -463,6 +463,9 @@ def build_examples(
         [d for d in strats_dfs['loss'].values()]
     )
 
+    log('Processing trades')
+    df = process_trades_df(df)
+
     # Save the final examples DataFrame if a directory was specified
     if save_dir is not None:
         if not os.path.exists(save_dir):
