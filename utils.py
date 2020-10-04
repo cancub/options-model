@@ -228,6 +228,14 @@ def pool_stats_from_stats_df(ticker):
         samples-pools, 0).sum() / (samples.sum() - pools.sum())
 
     # Variance needs to be recalculated for expiry timestamp, since each of the
+    # expiry files will have 0 variance.
+    exp_mean = new_means.expiry_timestamp
+    numerator = variances.apply(
+        lambda x: (x.expiry_timestamp - exp_mean)**2 * samples[x.name],
+        axis=1
+    )
+    new_variances.expiry_timestamp = numerator.sum() / samples.sum()
+
     # Ensure that some columns will not be normalized
     return set_standard_static_stats(new_means, new_variances)
 
