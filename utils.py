@@ -554,7 +554,12 @@ def describe_wins(wins_df, winning_profit, ticker):
 
         # Sanity check to see that we arrived at the same conclusion as the
         # spreads collector
-        assert(np.isclose(credits.max(), row.max_profit))
+        try:
+            assert(np.isclose(credits.max(), row.max_profit))
+        except Exception:
+            print(row)
+            print(credits.max(), row.max_profit)
+            raise
 
         profitable = ((credits > winning_profit)
                       | np.isclose(credits, winning_profit))
