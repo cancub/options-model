@@ -10,13 +10,62 @@ ML_DIR          = os.path.abspath('./learning')
 ML_DATA_DIR     = os.path.join(ML_DIR, 'data')
 ML_MODELS_DIR   = os.path.join(ML_DIR, 'models')
 
-DATA_NAMES      = ['bidPrice', 'askPrice', 'volume', 'volatility', 'delta',
-                    'gamma', 'theta', 'vega', 'rho', 'openInterest']
-TICKERS         = ['FB', 'LYB', 'SPY', 'TSLA', 'QQQ', 'AAPL', 'EEM', 'IWM',
-                   'NFLX', 'AMD', 'NVDA', 'GLD', 'SLV', 'VXX', 'GE', 'BAC',
-                   'BA', 'AAL', 'NAT', 'CCL', 'F', 'DIS', 'BABA', 'PFE' ,'SBUX',
-                   'M', 'ZM', 'SNAP', 'AMZN', 'C', 'ROKU', 'BBBY', 'UBER',
-                   'SDC', 'INTC', 'SPCE', 'TWTR', 'TLRY', 'MSFT']
+DATA_NAMES = [
+    'symbolId',
+    'bidPrice',
+    'askPrice',
+    'volume',
+    'volatility',
+    'delta',
+    'gamma',
+    'theta',
+    'vega',
+    'rho',
+    'openInterest'
+]
+
+TICKERS = [
+    'AAL',
+    'AAPL',
+    'AMD',
+    'AMZN',
+    'BA',
+    'BABA',
+    'BAC',
+    'BBBY',
+    'C',
+    'CCL',
+    'DIS',
+    'EEM',
+    'F',
+    'FB',
+    'GE',
+    'GLD',
+    'INTC',
+    'IWM',
+    'LYB',
+    'M',
+    'MSFT',
+    'NAT',
+    'NFLX',
+    'NVDA',
+    'PFE',
+    'QQQ',
+    'ROKU',
+    'SBUX',
+    'SDC',
+    'SLV',
+    'SNAP',
+    'SPCE',
+    'SPY',
+    'TLRY',
+    'TSLA',
+    'TWTR',
+    'UBER',
+    'VXX',
+    'ZM',
+]
+
 QUIET           = True
 
 # Maximum amount of margin we are allowed to use for trades
@@ -42,6 +91,7 @@ HEADER_COLS     = [
 ]
 
 LEG_COLUMNS_TEMPLATE = '''
+    leg{num}_symbolId
     leg{num}_type
     leg{num}_type_cat
     leg{num}_strike
