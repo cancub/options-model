@@ -57,15 +57,16 @@ def options_gofer(q_obj, ticker):
     # Save the new ticker DataFrame to file
     ticker_df.to_pickle(ticker_path)
 
-processes = []
+if __name__ == '__main__':
+    processes = []
 
-for ticker in config.TICKERS:
-    p = multiprocessing.Process(
-        target=options_gofer,
-        args=(deepcopy(QT), ticker,)
-    )
-    p.start()
-    processes.append(p)
+    for ticker in config.TICKERS:
+        p = multiprocessing.Process(
+            target=options_gofer,
+            args=(deepcopy(QT), ticker,)
+        )
+        p.start()
+        processes.append(p)
 
-for p in processes:
-    p.join()
+    for p in processes:
+        p.join()
