@@ -4,6 +4,7 @@ from copy import deepcopy
 import datetime
 import itertools
 import multiprocessing
+import numpy as np
 import os
 import pandas as pd
 
@@ -44,6 +45,12 @@ def options_gofer(q_obj, ticker):
 
     to_add_df = pd.DataFrame(
         data, index = pd.MultiIndex.from_tuples(indices, names=index_names))
+
+    try:
+        price = q_obj.get_security_price()
+    except Exception:
+        price = np.nan
+    to_add_df.insert(0, 'stock_price', price)
 
     # Load up the existing DataFrame for this ticker and append this new data
     # to it

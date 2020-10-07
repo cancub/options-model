@@ -147,8 +147,11 @@ def call_put_spread_worker(
             zip(all_open_times, leg2_strikes)].reset_index(drop=True)
 
         # Drop the bidPrice in the first leg and ask price in the second.
+        # Additionally, we only want to store the stock price column once, so
+        # pop it from the first leg for storage and drop it in the second leg.
+        prices_series = leg1_meta.pop('stock_price')
         leg1_meta.drop(['bidPrice'], axis=1, inplace=True)
-        leg2_meta.drop(['askPrice'], axis=1, inplace=True)
+        leg2_meta.drop(['askPrice', 'stock_price'], axis=1, inplace=True)
 
         # Flip the sign of the askPrice for the first leg
         leg1_meta.askPrice *= -1
@@ -181,8 +184,17 @@ def call_put_spread_worker(
 
         output_q.put(
             pd.concat(
-                (leg1_df.copy(), leg1_meta, leg2_meta, leg3_meta, leg4_meta),
-                axis=1))
+                (
+                    leg1_df.copy(),
+                    prices_series,
+                    leg1_meta,
+                    leg2_meta,
+                    leg3_meta,
+                    leg4_meta
+                ),
+                axis=1
+            )
+        )
 
     log('COMPLETE')
 
@@ -228,8 +240,8 @@ def butterfly_spread_worker(
         # price of the underlying security. Remove this to collect even the
         # weird trades
         viable_times = prices_df[
-            (((B_strike - prices_df*WINDOW) < prices_df) &
-               (prices_df < (B_strike + prices_df*WINDOW) ))[0]
+            (((B_strike - prices_df*WINDOW) < prices_df) # Not too low
+                & (prices_df < (B_strike + prices_df*WINDOW))) # Not too high
         ].index
 
         if viable_times.shape[0] == 0:
@@ -362,14 +374,17 @@ def butterfly_spread_worker(
 
             # There are the credits for the opens. Since we're buying legs 1 (A)
             # and 4 (C), we get rid of their bidPrices and we invert the
-            # askPrice
+            # askPrice. Additionally, we only want to store the stock price
+            # column once, so pop it from the first leg for storage and drop it
+            # in the remaining legs.
+            prices_series = leg1_meta.pop('stock_price')
             leg1_meta.drop(['bidPrice'], axis=1, inplace=True)
-            leg4_meta.drop(['bidPrice'], axis=1, inplace=True)
+            leg4_meta.drop(['bidPrice', 'stock_price'], axis=1, inplace=True)
             leg1_meta.askPrice *= -1
             leg4_meta.askPrice *= -1
 
             # Meanwhile, we're selling legs 2 and 3, so get rid of the askPrice
-            leg2_meta.drop(['askPrice'], axis=1, inplace=True)
+            leg2_meta.drop(['askPrice', 'stock_price'], axis=1, inplace=True)
 
             # Rename the prices to "credits"
             leg1_meta.rename(columns={'askPrice': 'credit'}, inplace=True)
@@ -394,8 +409,17 @@ def butterfly_spread_worker(
 
             output_q.put(
                 pd.concat(
-                    (a2b_df.copy(), leg1_meta, leg2_meta, leg3_meta, leg4_meta),
-                    axis=1))
+                    (
+                        a2b_df.copy(),
+                        prices_series,
+                        leg1_meta,
+                        leg2_meta,
+                        leg3_meta,
+                        leg4_meta
+                    ),
+                    axis=1
+                )
+            )
 
     log('COMPLETE')
 
@@ -409,7 +433,6 @@ def filesystem_worker(
     working_dir,
     ticker,
     expiry_dt,
-    prices_df,
     max_spreads,
     option_type,
     get_max_profit=True,
@@ -452,26 +475,6 @@ def filesystem_worker(
                 df_to_save = df_to_save[df_to_save[1] > ignore_loss]
 
         log('adding security prices')
-
-        try:
-            df_to_save['stock_price'] = prices_df.loc[
-                df_to_save.open_time].values[:, 0]
-        except KeyError:
-            # It's likely that the server did not store some of the desired
-            # times. Just eat the loss and get rid of these times
-            to_remove = []
-            opens = df_to_save.open_time
-            indices = prices_df.index
-            for i in range(opens.shape[0]):
-                otime = opens.iloc[i]
-                if otime not in indices and otime not in to_remove:
-                    to_remove.append(otime)
-            log(('Removing times that do not appear in prices DatFrame:'
-                   '\n{}').format(to_remove))
-            for otime in to_remove:
-                df_to_save = df_to_save[df_to_save.open_time != otime]
-            df_to_save['stock_price'] = prices_df.loc[
-                df_to_save.open_time].values[:, 0]
 
         df_to_save.insert(0, 'expiry', expiry_dt)
 
@@ -553,7 +556,6 @@ def collect_spreads(
     ticker,
     expiry,
     options_df,
-    prices_df=None,
     procs_pairs=5,
     max_margin=config.MARGIN,
     ignore_loss=None,
@@ -577,17 +579,7 @@ def collect_spreads(
     # Get the expiry as an aware datetime at the 4 pm closing bell
     expiry_dt = utils.expiry_string_to_aware_datetime(expiry)
 
-    # Get the full set of prices that occured during this dataframe
-    if prices_df is None:
-        if verbose:
-            print('Collecting security prices')
-        all_times = options_df.index.get_level_values(level=0)
-        prices_df = utils.get_security_prices(
-            ticker    = ticker,
-            start_dt  = all_times[0]-timedelta(minutes=5),
-            end_dt    = all_times[-1],
-            frequency = 'FiveMinutes'
-        )
+    prices_df = options_df.groupby(level=[0])['stock_price'].first()
 
     for o in ('C', 'P'):
         if verbose:
@@ -631,7 +623,6 @@ def collect_spreads(
                               tmpdir,
                               ticker,
                               expiry_dt,
-                              prices_df,
                               max_spreads_per_file,
                               o,
                               get_max_profit,
