@@ -554,7 +554,6 @@ def filesystem_worker(
 
 def collect_spreads(
     ticker,
-    expiry,
     options_df,
     procs_pairs=5,
     max_margin=config.MARGIN,
@@ -566,6 +565,12 @@ def collect_spreads(
     verbose=False,
     debug=False
 ):
+    def log(message):
+        if not verbose:
+            return
+        print('{hdr} {msg}'.format(
+                hdr=HEADER_TEMPLATE.format(name='Main', id=' '),
+                msg=message))
     # Make sure that there is an output directory ready for all of the data.
     # This directory will be returned when done
     tmpdir = tempfile.mkdtemp(prefix='tp-')
@@ -576,77 +581,83 @@ def collect_spreads(
     # And the threads will put their resulting DataFrames into this queue
     working_q = multiprocessing.Queue()
 
-    # Get the expiry as an aware datetime at the 4 pm closing bell
-    expiry_dt = utils.expiry_string_to_aware_datetime(expiry)
+    for expiry in sorted(options_df.index.unique(level=1)):
+        log(expiry)
 
-    prices_df = options_df.groupby(level=[0])['stock_price'].first()
+        expiry_df = options_df.xs(expiry, level=1)
 
-    for o in ('C', 'P'):
-        if verbose:
-            print('Working on spreads based on ' + o)
+        # Get the expiry as an aware datetime at the 4 pm closing bell
+        expiry_dt = utils.expiry_string_to_aware_datetime(expiry)
 
-        # These three DataFrames are used over and over by all of the workers.
-        option_type_df = options_df.xs(o, level=1)
-        bid_df = option_type_df['bidPrice'].unstack(level=[1])
-        ask_df = option_type_df['askPrice'].unstack(level=[1])
+        prices_df = expiry_df.groupby(level=[0])['stock_price'].first()
 
-        if not debug:
-            for collecter in (call_put_spread_worker, butterfly_spread_worker):
-                # Load in the list of strikes so that the threads can pull them
-                # out
-                for s in ask_df.columns:
-                    strikes_q.put(s)
+        for o in ('C', 'P'):
+            log('Working on spreads based on {}'.format(o))
 
-                processes = []
-                for i in range(procs_pairs):
-                    p = multiprocessing.Process(
-                        target=collecter,
-                        args=(i,
-                              option_type_df,
-                              bid_df,
-                              ask_df,
-                              prices_df,
-                              strikes_q,
-                              working_q,
-                              get_max_profit,
-                              max_margin,
-                              verbose,)
-                    )
-                    p.start()
-                    processes.append(p)
+            # These three DataFrames are used over and over by all of the
+            # workers.
+            option_type_df = expiry_df.xs(o, level=1)
+            bid_df = option_type_df['bidPrice'].unstack(level=[1])
+            ask_df = option_type_df['askPrice'].unstack(level=[1])
 
-                for i in range(procs_pairs):
-                    p = multiprocessing.Process(
-                        target=filesystem_worker,
-                        args=(i,
-                              working_q,
-                              tmpdir,
-                              ticker,
-                              expiry_dt,
-                              max_spreads_per_file,
-                              o,
-                              get_max_profit,
-                              winning_profit,
-                              loss_win_ratio,
-                              ignore_loss,
-                              verbose,)
-                    )
-                    p.start()
-                    processes.append(p)
+            if not debug:
+                for collecter in (call_put_spread_worker,
+                                  butterfly_spread_worker):
+                    # Load in the list of strikes so that the threads can pull
+                    # them out
+                    for s in ask_df.columns:
+                        strikes_q.put(s)
 
-                for p in processes:
-                    p.join()
+                    processes = []
+                    for i in range(procs_pairs):
+                        p = multiprocessing.Process(
+                            target=collecter,
+                            args=(i,
+                                  option_type_df,
+                                  bid_df,
+                                  ask_df,
+                                  prices_df,
+                                  strikes_q,
+                                  working_q,
+                                  get_max_profit,
+                                  max_margin,
+                                  verbose,)
+                        )
+                        p.start()
+                        processes.append(p)
 
-        else:
-            call_put_spread_worker(
-                0,
-                option_type_df,
-                bid_df,
-                ask_df,
-                strikes_q,
-                working_q,
-                max_margin,
-                verbose,
-            )
+                    for i in range(procs_pairs):
+                        p = multiprocessing.Process(
+                            target=filesystem_worker,
+                            args=(i,
+                                  working_q,
+                                  tmpdir,
+                                  ticker,
+                                  expiry_dt,
+                                  max_spreads_per_file,
+                                  o,
+                                  get_max_profit,
+                                  winning_profit,
+                                  loss_win_ratio,
+                                  ignore_loss,
+                                  verbose,)
+                        )
+                        p.start()
+                        processes.append(p)
+
+                    for p in processes:
+                        p.join()
+
+            else:
+                call_put_spread_worker(
+                    0,
+                    option_type_df,
+                    bid_df,
+                    ask_df,
+                    strikes_q,
+                    working_q,
+                    max_margin,
+                    verbose,
+                )
 
     return tmpdir

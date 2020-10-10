@@ -52,7 +52,7 @@ def load_options(ticker, expiry=None):
         )
 
     if expiry is not None:
-        df = df.xs(expiry, level=1)
+        df = df.xs(expiry, level=1, drop_level=False)
 
     return df
 
@@ -87,7 +87,6 @@ def load_spreads(
         print('Building spreads.')
 
     out_dir = tp.collect_spreads(ticker,
-                                 expiry,
                                  options_df,
                                  winning_profit=winning_profit,
                                  loss_win_ratio=loss_win_ratio,
