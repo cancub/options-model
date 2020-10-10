@@ -51,7 +51,8 @@ def load_options(ticker, expiry=None):
             compression='bz2'
         )
 
-    df = df.xs(expiry, level=1)
+    if expiry is not None:
+        df = df.xs(expiry, level=1)
 
     return df
 
