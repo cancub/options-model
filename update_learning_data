@@ -4,6 +4,7 @@ import pandas as pd
 import sys
 
 import config
+import op_stats
 import utils
 
 avoid_tickers = ['AAPL', 'TSLA']
@@ -58,7 +59,7 @@ for ticker in tickers:
     for exp in sorted(to_add):
         print('Adding stats for {}'.format(exp))
         exp_spreads_path = os.path.join(spread_dir, '{}.tar'.format(exp))
-        means, variances, samples, pools = utils.pool_stats_from_expiry(
+        means, variances, samples, pools = op_stats.pool_stats_from_expiry(
             exp_spreads_path)
 
         # Make the DataFrame for this expiry's stats
