@@ -86,8 +86,7 @@ def load_spreads(
     if verbose:
         print('Building spreads.')
 
-    out_dir = tp.collect_spreads(ticker,
-                                 options_df,
+    out_dir = tp.collect_spreads(options_df,
                                  winning_profit=winning_profit,
                                  loss_win_ratio=loss_win_ratio,
                                  verbose=verbose)

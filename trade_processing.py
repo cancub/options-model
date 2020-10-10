@@ -15,11 +15,6 @@ DONE = 'finished'
 
 HEADER_TEMPLATE = '{name:<15} {id:>2}:'
 
-def collect_TA(ticker, dates):
-    # return the technical analysis portion for the ticker to be used in the
-    # final input vector
-    pass
-
 # ============================== Vertical spreads ==============================
 
 def call_put_spread_worker(
@@ -431,7 +426,6 @@ def filesystem_worker(
     id,
     input_q,
     working_dir,
-    ticker,
     expiry_dt,
     max_spreads,
     option_type,
@@ -553,7 +547,6 @@ def filesystem_worker(
     log('COMPLETE')
 
 def collect_spreads(
-    ticker,
     options_df,
     procs_pairs=5,
     max_margin=config.MARGIN,
@@ -636,7 +629,6 @@ def collect_spreads(
                             args=(i,
                                   working_q,
                                   exp_dir,
-                                  ticker,
                                   expiry_dt,
                                   max_spreads_per_file,
                                   o,
