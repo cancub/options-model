@@ -102,8 +102,9 @@ def load_spreads(
         os.makedirs(ticker_dir)
 
     # Package it into a tarball
+    exp_dir = os.path.join(out_dir, expiry)
     subprocess.check_call(
-        ['tar', '-C', out_dir, '-cf', spreads_path] + os.listdir(out_dir))
+        ['tar', '-C', exp_dir, '-cf', spreads_path] + os.listdir(exp_dir))
 
     shutil.rmtree(out_dir)
 

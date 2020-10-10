@@ -584,6 +584,10 @@ def collect_spreads(
     for expiry in sorted(options_df.index.unique(level=1)):
         log(expiry)
 
+        # Make a subdirectory for this expiry in the temporary directory
+        exp_dir = os.path.join(tmpdir, expiry)
+        os.mkdir(exp_dir)
+
         expiry_df = options_df.xs(expiry, level=1)
 
         # Get the expiry as an aware datetime at the 4 pm closing bell
@@ -631,7 +635,7 @@ def collect_spreads(
                             target=filesystem_worker,
                             args=(i,
                                   working_q,
-                                  tmpdir,
+                                  exp_dir,
                                   ticker,
                                   expiry_dt,
                                   max_spreads_per_file,
