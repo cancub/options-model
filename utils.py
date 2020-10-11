@@ -64,27 +64,26 @@ def load_spreads(
     refresh=False,
     verbose=False
 ):
+    def log(msg):
+        if not verbose: return
+        print(msg)
+
     ticker_dir = os.path.join(config.SPREADS_DIR, ticker)
     spreads_path = os.path.join(ticker_dir, '{}.tar'.format(expiry))
 
     # Do we want to load the spreads from scratch?
     if not refresh:
-        if verbose:
-            print('Attempting to locate saved spreads')
+        log('Attempting to locate saved spreads')
         if os.path.exists(spreads_path):
-            if verbose:
-                print('Saved spreads located.')
+            log('Saved spreads located.')
             return spreads_path
-        if verbose:
-            print('No spreads saved.')
+        log('No spreads saved.')
 
-    if verbose:
-        print('Loading options')
+    log('Loading options')
 
     options_df = load_options(ticker, expiry)
 
-    if verbose:
-        print('Building spreads.')
+    log('Building spreads.')
 
     out_dir = tp.collect_spreads(options_df,
                                  winning_profit=winning_profit,
@@ -92,12 +91,10 @@ def load_spreads(
                                  verbose=verbose)
 
     # Save these so that we don't have to reload them next time
-    if verbose:
-        print('Adding spreads to datastore.')
+    log('Adding spreads to datastore.')
 
     if not os.path.exists(ticker_dir):
-        if verbose:
-            print('Creating ticker directory {}.'.format(ticker_dir))
+        log('Creating ticker directory {}.'.format(ticker_dir))
         os.makedirs(ticker_dir)
 
     # Package it into a tarball
