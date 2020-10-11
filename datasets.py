@@ -350,8 +350,8 @@ def _get_parser():
         help='The maximum margin to open the trade. (NOTE: per 100 trades)')
     parser.add_argument(
         '-w', '--winning-profit', type=float, default=1, dest='min_profit',
-        help=('The minimum profit for the data to display. NOTE: fees will be '
-              'added, so 1 is really 1+fees.'))
+        help=('The dollar value threshold between what is considered a "win" '
+              'and a "loss." NOTE: per 100 trades'))
     parser.add_argument(
         '-t', '--total-datapoints', type=int, default=1*10**6,
         help='The total number of examples that must be generated.')

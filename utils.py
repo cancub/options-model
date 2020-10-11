@@ -201,12 +201,6 @@ def randomize_legs_columns(df):
     df.columns = [c for c in config.HEADER_COLS if c in df.columns] + \
                  _get_column_name_list(shuffle=True)
 
-def calculate_fee(count=1, both_sides=True):
-    fee = config.BASE_FEE + count
-    if both_sides:
-        fee *= 2
-    return fee / 100
-
 def get_security_prices(ticker, start_dt, end_dt, frequency):
     qs = QuestradeSecurities()
     candles = qs.get_candlesticks(ticker, str(start_dt), str(end_dt), frequency)

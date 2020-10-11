@@ -77,7 +77,8 @@ IGNORE_LOSS     = 0
 
 TOTAL_LEGS      = 4
 
-BASE_FEE        = 9.95
+# 9.95 USD -> CAD
+BASE_FEE        = 13
 
 HEADER_COLS     = [
     'description',

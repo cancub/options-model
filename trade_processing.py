@@ -39,6 +39,9 @@ def call_put_spread_worker(
 
     log('START')
 
+    # Questrade needs to take its cut too
+    trade_fees = (config.BASE_FEE + 2) * 2 / 100
+
     while True:
         # Grab a strike for the leg we will be longing
         try:
@@ -94,7 +97,8 @@ def call_put_spread_worker(
                 index   = close_credits.index
             )
 
-            max_profits = open_credits + close_credits
+            # Get the maximum profit less fees
+            max_profits = open_credits + close_credits - trade_fees
             max_profits = max_profits.stack(level=0, dropna=False)
             leg1_df = pd.concat((open_margins, max_profits), axis=1)
         else:
@@ -224,6 +228,9 @@ def butterfly_spread_worker(
 
     all_strikes = ask_df.columns
 
+    # Questrade needs to take its cut too
+    trade_fees = (config.BASE_FEE + 4) * 2 / 100
+
     while True:
         # Grab a strike for the leg we will be longing
         try:
@@ -316,7 +323,8 @@ def butterfly_spread_worker(
                     index   = close_credits.index
                 )[viable_opens]
 
-                max_profits = open_credits + close_credits
+                # Get the maximum profit less fees
+                max_profits = open_credits + close_credits - trade_fees
                 max_profits = max_profits.stack(level=0, dropna=False)
                 a2b_df = pd.concat((open_margins, max_profits), axis=1)
 
