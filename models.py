@@ -34,8 +34,11 @@ class OptionsModel(object):
             self._stds = pd.read_pickle(
                 os.path.join(tmpdir, 'variances')).pow(1/2)
 
+
             with open(os.path.join(tmpdir, 'metadata'), 'r') as MF:
-                self._feature_order = json.load(MF)['feature_order']
+                metadata = json.load(MF)
+                self._feature_order = metadata['feature_order']
+                self.percentiles = metadata['percentiles']
 
         self._model.compile(
             loss=keras.losses.BinaryCrossentropy(from_logits=True))
