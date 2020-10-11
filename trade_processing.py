@@ -180,7 +180,7 @@ def call_put_spread_worker(
         output_q.put(
             pd.concat(
                 (
-                    leg1_df.copy(),
+                    leg1_df,
                     prices_series,
                     leg1_meta,
                     leg2_meta,
@@ -405,7 +405,7 @@ def butterfly_spread_worker(
             output_q.put(
                 pd.concat(
                     (
-                        a2b_df.copy(),
+                        a2b_df,
                         prices_series,
                         leg1_meta,
                         leg2_meta,
