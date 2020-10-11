@@ -220,7 +220,30 @@ def build_dataset(
                 if enough_wins and enough_losses:
                     break
 
-                strat_wins, strat_losses = collect_strategy_data(strat)
+                try:
+                    strat_wins, strat_losses = collect_strategy_data(strat)
+                except StopIteration:
+                    # There weren't enough elements to fulfil the request.
+                    # Continue on, assuming the new values for minimum wins and
+                    # losses based on whatever we were able to find from this
+                    # strategy.
+                    count = int((total_wins * total_strategies) / win_frac)
+                    log('Only {} wins available. Resetting count to {}'.format(
+                            total_wins, count))
+
+                    min_wins = int((count * win_frac) / total_strategies)
+                    min_losses = int((count * (1 - win_frac))
+                                        / total_strategies)
+
+                    win_pool_size = min_wins * \
+                        (1 if not hard_winners else win_pool_multiplier)
+                    loss_pool_size = min_losses * \
+                        (1 if not hard_losers else loss_pool_multiplier)
+
+                    log('Min wins: {}'.format(min_wins))
+                    log('Min losses: {}'.format(min_losses))
+                    break
+
                 if not enough_wins and strat_wins is not None:
                     strats_dfs['win'][strat] = pd.concat((
                         strats_dfs['win'][strat], strat_wins))
