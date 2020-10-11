@@ -18,7 +18,7 @@ except:
 for ticker in tickers:
     print('{star}{tik}{star}'.format(star='='*40, tik=ticker))
     raw_dir = os.path.join(config.EXPIRIES_DIR, ticker)
-    spread_dir = os.path.join(config.ML_DATA_DIR, ticker)
+    spread_dir = os.path.join(config.SPREADS_DIR, ticker)
 
     try:
         raw_expiries = [os.path.splitext(r)[0] for r in os.listdir(raw_dir)]

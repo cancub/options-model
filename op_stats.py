@@ -24,7 +24,7 @@ def collect_statistics(trades_df):
 
 def pool_stats_from_stats_df(ticker):
     stats_df = pd.read_pickle(os.path.join(
-        config.ML_DATA_DIR, ticker, 'stats'))
+        config.SPREADS_DIR, ticker, 'stats'))
 
     # Only collect one set of pools and samples (not doubling up for means and
     # variances)

@@ -4,8 +4,8 @@ import pytz
 
 STORAGE_DIR     = os.path.abspath('./pickles')
 BACKUPS_DIR     = os.path.abspath('./backups')
+SPREADS_DIR     = os.path.abspath('./spreads')
 EXPIRIES_DIR    = os.path.abspath('./expiries')
-TRADES_DIR      = os.path.abspath('./trades')
 ML_DIR          = os.path.abspath('./learning')
 ML_DATA_DIR     = os.path.join(ML_DIR, 'data')
 ML_MODELS_DIR   = os.path.join(ML_DIR, 'models')

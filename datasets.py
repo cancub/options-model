@@ -136,7 +136,7 @@ def build_dataset(
     log('Winning profit: {}'.format(min_profit * 100))
 
     # Get the paths to the available spreads tarballs
-    data_dir = os.path.join(config.ML_DATA_DIR, ticker)
+    data_dir = os.path.join(config.SPREADS_DIR, ticker)
     tarball_paths = (os.path.join(data_dir, f) for f in os.listdir(data_dir)
                      if f.endswith('.tar'))
 

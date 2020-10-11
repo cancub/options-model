@@ -64,7 +64,7 @@ def load_spreads(
     refresh=False,
     verbose=False
 ):
-    ticker_dir = os.path.join(config.ML_DATA_DIR, ticker)
+    ticker_dir = os.path.join(config.SPREADS_DIR, ticker)
     spreads_path = os.path.join(ticker_dir, '{}.tar'.format(expiry))
 
     # Do we want to load the spreads from scratch?
