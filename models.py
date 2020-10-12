@@ -134,7 +134,7 @@ def load_best_model(ticker, max_margin=np.inf, min_profit = 0):
 
     # Only look atthose which satisfy the arguments
     good_models = details[
-        (details.max_margin <= max_margin)
+        (details.max_margin >= max_margin)
             & (details.min_profit >= min_profit)
     ]
 
