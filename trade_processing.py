@@ -528,12 +528,12 @@ def collect_spreads_generator(
     get_max_profit=True,
     max_spreads_per_file=25000,
     generator=False,
-    verbose=False,
+    verbose=0,
     debug=False
 ):
 
     def log(message):
-        if not verbose:
+        if verbose < 1:
             return
         print('{hdr} {msg}'.format(
                 hdr=HEADER_TEMPLATE.format(name='Main', id=' '),
@@ -594,7 +594,7 @@ def collect_spreads_generator(
                                   working_q,
                                   get_max_profit,
                                   max_margin,
-                                  verbose,)
+                                  verbose>1,)
                         )
                         p.start()
                         processes.append(p)
@@ -608,7 +608,7 @@ def collect_spreads_generator(
                                   expiry_dt,
                                   max_spreads_per_file,
                                   o,
-                                  verbose,)
+                                  verbose>1,)
                         )
                         p.start()
                         processes.append(p)
@@ -636,12 +636,12 @@ def collect_spreads_saver(
     max_margin=config.MARGIN,
     get_max_profit=True,
     max_spreads_per_file=25000,
-    verbose=False,
+    verbose=0,
     debug=False
 ):
 
     def log(message):
-        if not verbose:
+        if verbose < 1:
             return
         print('{hdr} {msg}'.format(
                 hdr=HEADER_TEMPLATE.format(name='Main', id=' '),
@@ -718,7 +718,7 @@ def collect_spreads_saver(
                                   working_q,
                                   get_max_profit,
                                   max_margin,
-                                  verbose,)
+                                  verbose>1,)
                         )
                         p.start()
                         processes.append(p)
@@ -732,7 +732,7 @@ def collect_spreads_saver(
                                   expiry_dt,
                                   max_spreads_per_file,
                                   o,
-                                  verbose,)
+                                  verbose>1,)
                         )
                         p.start()
                         processes.append(p)

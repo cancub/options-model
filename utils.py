@@ -60,10 +60,10 @@ def load_spreads(
     ticker,
     expiry,
     refresh=False,
-    verbose=False
+    verbose=0
 ):
     def log(msg):
-        if not verbose: return
+        if verbose < 1: return
         print(msg)
 
     ticker_dir = os.path.join(config.SPREADS_DIR, ticker)
@@ -83,7 +83,7 @@ def load_spreads(
 
     log('Building spreads.')
 
-    out_dir = tp.collect_spreads_saver(options_df, verbose=verbose)
+    out_dir = tp.collect_spreads_saver(options_df, verbose=verbose-1)
 
     # Save these so that we don't have to reload them next time
     log('Adding spreads to datastore.')
