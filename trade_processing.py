@@ -433,14 +433,10 @@ def butterfly_spread_worker(
 def filesystem_worker(
     id,
     input_q,
-    working_dir,
+    finish_fn,
     expiry_dt,
     max_spreads,
     option_type,
-    get_max_profit=True,
-    winning_profit=None,
-    loss_win_ratio=None,
-    ignore_loss=None,
     verbose=False,
 ):
     def log(message):
@@ -456,41 +452,9 @@ def filesystem_worker(
         log('processing {} "{}" spreads'.format(
                 df_to_save.shape[0], strategy_name))
 
-        if get_max_profit:
-            if winning_profit is not None and loss_win_ratio is not None:
-                # Determine the max profits when purchasing one of these trades
-                losers = df_to_save[df_to_save.max_profit < winning_profit]
-                winners = df_to_save[df_to_save.max_profit >= winning_profit]
-                total_winners = winners.shape[0]
-
-                # Get at most the desired ratio of losers to winners, using the
-                # losers that were closest to profit
-                losers_to_get = total_winners * loss_win_ratio
-
-                df_to_save = pd.concat((
-                    winners,
-                    losers.sort_values(
-                        by='max_profit', ascending=False)[:losers_to_get]
-                ))
-            if ignore_loss is not None:
-                # Don't bother with trades we won't be using for training
-                df_to_save = df_to_save[df_to_save[1] > ignore_loss]
-
-        log('adding security prices')
-
         df_to_save.insert(0, 'expiry', expiry_dt)
 
-        # Make sure that the filename includes the strategy type so that we can
-        # reference this without opening up the DataFrame
-        filepath = os.path.join(
-            working_dir,
-            '{name}-{id}.bz2'.format(
-                name=strategy_name.replace(' ', '_'),
-                id=uuid.uuid4().hex
-            )
-        )
-        log('saving to {}'.format(filepath))
-        df_to_save.reset_index(drop=True).to_pickle(filepath)
+        finish_fn(strategy_name, df_to_save)
 
     def describer(row):
         otype = 'call' if row.leg1_type == 'C' else 'put'
@@ -552,29 +516,37 @@ def filesystem_worker(
         # into a new file
         save_piece(strategy, df)
 
+    # Finally, let the finish function know that _we_ are finished
+    finish_fn(DONE)
+
     log('COMPLETE')
 
-def collect_spreads(
+def collect_spreads_generator(
     options_df,
     procs_pairs=5,
     max_margin=config.MARGIN,
-    ignore_loss=None,
     get_max_profit=True,
-    winning_profit=None,
-    loss_win_ratio=None,
     max_spreads_per_file=25000,
+    generator=False,
     verbose=False,
     debug=False
 ):
+
     def log(message):
         if not verbose:
             return
         print('{hdr} {msg}'.format(
                 hdr=HEADER_TEMPLATE.format(name='Main', id=' '),
                 msg=message))
-    # Make sure that there is an output directory ready for all of the data.
-    # This directory will be returned when done
-    tmpdir = tempfile.mkdtemp(prefix='tp-')
+
+    # We want to yield the output to the calling process, so we add it to a
+    # queue the the main thread will yield
+    output_q = multiprocessing.Queue()
+
+    def add_to_queue(label, df=None):
+        if label != DONE:
+            log('Adding {} trades to queue.'.format(df.shape[0]))
+        output_q.put((label, df))
 
     # First we need a Queue of the strikes to be used for the buying leg.
     strikes_q = multiprocessing.Queue()
@@ -584,10 +556,6 @@ def collect_spreads(
 
     for expiry in sorted(options_df.index.unique(level=1)):
         log(expiry)
-
-        # Make a subdirectory for this expiry in the temporary directory
-        exp_dir = os.path.join(tmpdir, expiry)
-        os.mkdir(exp_dir)
 
         expiry_df = options_df.xs(expiry, level=1)
 
@@ -636,14 +604,134 @@ def collect_spreads(
                             target=filesystem_worker,
                             args=(i,
                                   working_q,
-                                  exp_dir,
+                                  add_to_queue,
                                   expiry_dt,
                                   max_spreads_per_file,
                                   o,
+                                  verbose,)
+                        )
+                        p.start()
+                        processes.append(p)
+
+                    finished_count = 0
+                    # Move on to the next set in response to N spread
+                    # workers quitting
+                    while finished_count < procs_pairs:
+                        label, df = output_q.get()
+
+                        if label == DONE:
+                            finished_count += 1
+                            continue
+
+                        # Give the calling process what it wants
+                        log('yielding')
+                        yield (label, df)
+
+                    for p in processes:
+                        p.join()
+
+def collect_spreads_saver(
+    options_df,
+    procs_pairs=5,
+    max_margin=config.MARGIN,
+    get_max_profit=True,
+    max_spreads_per_file=25000,
+    verbose=False,
+    debug=False
+):
+
+    def log(message):
+        if not verbose:
+            return
+        print('{hdr} {msg}'.format(
+                hdr=HEADER_TEMPLATE.format(name='Main', id=' '),
+                msg=message))
+
+    # Make sure that there is an output directory ready for all of the data.
+    # This directory will be returned when done
+    tmpdir = tempfile.mkdtemp(prefix='tp-')
+
+    # First we need a Queue of the strikes to be used for the buying leg.
+    strikes_q = multiprocessing.Queue()
+
+    # And the threads will put their resulting DataFrames into this queue
+    working_q = multiprocessing.Queue()
+
+    for expiry in sorted(options_df.index.unique(level=1)):
+        log(expiry)
+
+        # Make a subdirectory for this expiry in the temporary directory
+        exp_dir = os.path.join(tmpdir, expiry)
+        os.mkdir(exp_dir)
+
+        def save_df(label, df=None):
+            if label == DONE:
+                return
+
+            # Make sure that the filename includes the strategy type so that we
+            # can reference this without opening up the DataFrame.
+            filepath = os.path.join(
+                exp_dir,
+                '{name}-{id}.bz2'.format(
+                    name=label.replace(' ', '_'),
+                    id=uuid.uuid4().hex
+                )
+            )
+            log('saving to {}'.format(filepath))
+
+            df.reset_index(drop=True).to_pickle(filepath)
+
+        expiry_df = options_df.xs(expiry, level=1)
+
+        # Get the expiry as an aware datetime at the 4 pm closing bell
+        expiry_dt = utils.expiry_string_to_aware_datetime(expiry)
+
+        prices_df = expiry_df.groupby(level=[0])['stock_price'].first()
+
+        for o in ('C', 'P'):
+            log('Working on spreads based on {}'.format(o))
+
+            # These three DataFrames are used over and over by all of the
+            # workers.
+            option_type_df = expiry_df.xs(o, level=1)
+            bid_df = option_type_df['bidPrice'].unstack(level=[1])
+            ask_df = option_type_df['askPrice'].unstack(level=[1])
+
+            if not debug:
+                for collecter in (call_put_spread_worker,
+                                  butterfly_spread_worker):
+                    # Load in the list of strikes so that the threads can pull
+                    # them out
+                    for s in ask_df.columns:
+                        strikes_q.put(s)
+
+                    processes = []
+                    for i in range(procs_pairs):
+                        p = multiprocessing.Process(
+                            target=collecter,
+                            args=(i,
+                                  option_type_df,
+                                  bid_df,
+                                  ask_df,
+                                  prices_df,
+                                  strikes_q,
+                                  working_q,
                                   get_max_profit,
-                                  winning_profit,
-                                  loss_win_ratio,
-                                  ignore_loss,
+                                  max_margin,
+                                  verbose,)
+                        )
+                        p.start()
+                        processes.append(p)
+
+                    for i in range(procs_pairs):
+                        p = multiprocessing.Process(
+                            target=filesystem_worker,
+                            args=(i,
+                                  working_q,
+                                  save_df,
+                                  expiry_dt,
+                                  max_spreads_per_file,
+                                  o,
                                   verbose,)
                         )
                         p.start()
@@ -651,17 +739,5 @@ def collect_spreads(
 
                     for p in processes:
                         p.join()
-
-            else:
-                call_put_spread_worker(
-                    0,
-                    option_type_df,
-                    bid_df,
-                    ask_df,
-                    strikes_q,
-                    working_q,
-                    max_margin,
-                    verbose,
-                )
 
     return tmpdir

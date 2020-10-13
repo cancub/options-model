@@ -59,8 +59,6 @@ def load_options(ticker, expiry=None):
 def load_spreads(
     ticker,
     expiry,
-    winning_profit=None,
-    loss_win_ratio=None,
     refresh=False,
     verbose=False
 ):
@@ -85,10 +83,7 @@ def load_spreads(
 
     log('Building spreads.')
 
-    out_dir = tp.collect_spreads(options_df,
-                                 winning_profit=winning_profit,
-                                 loss_win_ratio=loss_win_ratio,
-                                 verbose=verbose)
+    out_dir = tp.collect_spreads_saver(options_df, verbose=verbose)
 
     # Save these so that we don't have to reload them next time
     log('Adding spreads to datastore.')
