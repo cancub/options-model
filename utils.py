@@ -153,6 +153,28 @@ def process_trades_df(df):
     add_options_type_categories(df)
     return sort_trades_df_columns(df)
 
+def strats_paths_to_generators(strats_paths):
+
+    def strat_paths_to_generator(strat_paths):
+        np.random.shuffle(strat_paths)
+        for p in strat_paths:
+            yield pd.read_pickle(p)
+
+    def path_to_name(p):
+        return os.path.split(p)[1].split('-')[0]
+
+    strats_dicts = {}
+
+    # Walk through the files and append them to their respective list of
+    # strategy DataFrame paths in the dictionary
+    for p in strats_paths:
+        try:
+            strats_dicts[path_to_name(p)].append(p)
+        except KeyError:
+            strats_dicts[path_to_name(p)] = [p]
+
+    return {k: strat_paths_to_generator(v) for k, v in strats_dicts.items()}
+
 def spreads_tarballs_to_generator(tarball_paths, count=None, shuffle=True):
     # First we need to get a list of all of the files to be loaded
     if not isinstance(tarball_paths, list):

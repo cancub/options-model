@@ -105,28 +105,6 @@ def build_dataset(
         if verbose:
             print(msg)
 
-    def strats_paths_to_generators(strats_paths):
-
-        def strat_paths_to_generator(strat_paths):
-            np.random.shuffle(strat_paths)
-            for p in strat_paths:
-                yield pd.read_pickle(p)
-
-        def path_to_name(p):
-            return os.path.split(p)[1].split('-')[0]
-
-        strats_dicts = {}
-
-        # Walk through the files and append them to their respective list of
-        # strategy DataFrame paths in the dictionary
-        for p in strats_paths:
-            try:
-                strats_dicts[path_to_name(p)].append(p)
-            except KeyError:
-                strats_dicts[path_to_name(p)] = [p]
-
-        return {k: strat_paths_to_generator(v) for k, v in strats_dicts.items()}
-
     # We must add the fee for each trade (open and close) to
     strategy_generators = {}
     strats_dfs = {'win': {}, 'loss': {}}
