@@ -108,7 +108,8 @@ def apply_func_to_dfs_in_tarball(tarball_path, func):
             fpath = os.path.join(tmpdir, f)
             # Let the function know the name of the file, just in case
             df = func(pd.read_pickle(fpath), f)
-            df.to_pickle(fpath)
+            if df is not None:
+                df.to_pickle(fpath)
         subprocess.check_call(
             ['tar', '-C', tmpdir, '-cf', tarball_path] + file_list)
 
@@ -117,7 +118,8 @@ def apply_func_to_dfs_in_dir(df_dir, func):
     for f in os.listdir(exp_dir):
         fpath = os.path.join(exp_dir, f)
         df = func(pd.read_pickle(fpath), fpath)
-        df.to_pickle(fpath)
+        if df is not None:
+            df.to_pickle(fpath)
 
 def extract_and_get_file_list(tarball_path, output_dir):
     files_bytes = subprocess.check_output(
