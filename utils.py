@@ -69,6 +69,10 @@ def load_spreads(
     ticker_dir = os.path.join(config.SPREADS_DIR, ticker)
     spreads_path = os.path.join(ticker_dir, '{}.tar'.format(expiry))
 
+    if not os.path.exists(ticker_dir):
+        log('Creating ticker directory {}.'.format(ticker_dir))
+        os.makedirs(ticker_dir)
+
     # Do we want to load the spreads from scratch?
     if not refresh:
         log('Attempting to locate saved spreads')
@@ -83,21 +87,79 @@ def load_spreads(
 
     log('Building spreads.')
 
-    out_dir = tp.collect_spreads_saver(options_df, verbose=verbose-1)
+    spreads_gen = tp.collect_spreads_generator(
+        options_df, verbose=verbose-1, generator=True)
 
-    # Save these so that we don't have to reload them next time
-    log('Adding spreads to datastore.')
+    # We want to make sure that the data is adequately shuffled so that when
+    # it's loaded later on, we don't have a full block of essentially the same
+    # trade.
+    save_threshold = 1*10**6
+    save_count = 5*10**4
 
-    if not os.path.exists(ticker_dir):
-        log('Creating ticker directory {}.'.format(ticker_dir))
-        os.makedirs(ticker_dir)
+    buffers = {}
 
-    # Package it into a tarball
-    exp_dir = os.path.join(out_dir, expiry)
-    subprocess.check_call(
-        ['tar', '-C', exp_dir, '-cf', spreads_path] + os.listdir(exp_dir))
+    # We still need to break the data up into smaller chunks, so make a new
+    # directory to store these shuffled chunks as we build them
+    with tempfile.TemporaryDirectory(prefix='shuffle-') as tmpdir:
+        def save_strat(strat, df):
+            log('Saving {} {} spreads.'.format(df.shape[0], strat))
+            # We want to de-shuffle here to improve compression
+            df.sort_values(
+                by=['open_time', 'leg1_strike', 'leg2_strike'],
+                ignore_index=True
+            ).to_pickle(
+                os.path.join(
+                    tmpdir,
+                    '{}-{}.bz2'.format(
+                        strat.replace(' ', '_'),
+                        uuid.uuid4().hex
+                    )
+                )
+            )
 
-    shutil.rmtree(out_dir)
+        def spin_off_and_save(strat, df):
+            save_strat(strat, df.iloc[:save_count])
+            return df.iloc[save_count:]
+
+        def strat_shuffle(df):
+            # Make sure there aren't duplicate indices
+            df.reset_index(drop=True, inplace=True)
+            # Shuffle
+            df = df.reindex(np.random.permutation(df.index))
+            # Reset the index once more
+            return df.reset_index(drop=True)
+
+        for strat, df in spreads_gen:
+
+            log('Got {} data'.format(strat))
+
+            # Add to the buffer for this strategy
+            buffers[strat] = pd.concat((buffers.get(strat, None), df))
+
+            # Once we hit the threshold of data, shuffle and save a slice of
+            # the data
+            if buffers[strat].shape[0] >= save_threshold:
+                buffers[strat] = spin_off_and_save(
+                    strat, strat_shuffle(buffers[strat]))
+
+        # There's no more data left, so give each of the strategy buffers one
+        # last shuffle and then split them into as many DataFrames of the
+        # prescribed size as we can.
+        for strat, buffer in buffers.items():
+            buffer = strat_shuffle(buffer)
+            while buffer.shape[0] > save_count:
+                buffer = spin_off_and_save(strat, buffer)
+
+            # Save whatever is left
+            if buffer.shape[0] > 0:
+                save_strat(strat, buffer)
+
+        # Save these so that we don't have to reload them next time
+        log('Adding spreads to datastore.')
+
+        # Package it into a tarball
+        subprocess.check_call(
+            ['tar', '-C', tmpdir, '-cf', spreads_path] + os.listdir(tmpdir))
 
     return spreads_path
 
