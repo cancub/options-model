@@ -1,10 +1,13 @@
 #! /usr/bin/env python
+import tensorflow as tf
+
 import argparse
 from   io import BytesIO
 import json
 import numpy as np
 import os
 import pandas as pd
+import random
 import subprocess
 import tempfile
 import uuid
@@ -13,13 +16,16 @@ import config
 import utils
 
 class OptionsDataset(object):
-    _files = ['dataframe', 'metadata']
-    def __init__(self, ticker, df=None, id=None, metadata=None):
-        self._data     = df
-        self._metadata = metadata
-        self._id       = id
+
+    _files = ['train.bz2', 'val.bz2', 'test.bz2', 'metadata']
+
+    def __init__(self, ticker, train_df, val_df, test_df, metadata, id=None):
+        self.metadata = metadata
+        self._id       = id or uuid.uuid4()
+        self._train_df = train_df
+        self._val_df   = val_df
+        self._test_df  = test_df
         self._dir      = os.path.join(config.ML_DATA_DIR, ticker)
-        self._labels   = None
 
     def get_dataset_path(self):
         return os.path.join(self._dir, '{}.tar'.format(self._id))
@@ -29,45 +35,80 @@ class OptionsDataset(object):
             ['tar', '-xOf', self.get_dataset_path(), filename]))
 
     @property
-    def data(self):
-        if self._data is None:
-            self._data = pd.read_pickle(
-                self._extract_file_to_bytes_fd('dataframe'),
-                compression='bz2'
-            )
-        return self._data
+    def n_train(self):
+        return self._train_df.shape[0]
+    @property
+    def n_val(self):
+        return self._val_df.shape[0]
+    @property
+    def n_test(self):
+        return self._test_df.shape[0]
 
     @property
-    def metadata(self):
-        if self._metadata is None:
-            self._metadata = json.load(
-                self._extract_file_to_bytes_fd('metadata'))
-        return self._metadata
+    def n_features(self):
+        return self._train_df.shape[1]
 
-    @property
-    def labels(self):
-        if self._labels is None:
-            self._labels = self.data.max_profit >= self.metadata['min_profit']
-        return self._labels
+    def _normalize(self, df, feature_order, means, stds):
+        return (df[feature_order] - means[feature_order]) / stds[feature_order]
 
-    def save(self, id=None):
-        if id is None:
-            if self._id is None:
-                # Figure out what we should call ourselves in the filesystem
-                self._id = uuid.uuid4()
-        else:
-            self._id = id
+    def _build_dataset(self, df, feature_order, means, stds):
+        X_norm = self._normalize(df, feature_order, means, stds)
+        Y = df.max_profit >= self.metadata['min_profit']
+        return tf.data.Dataset.from_tensor_slices(
+            (X_norm.values, Y.values))
+
+    def get_train_set(self, feature_order, means, stds):
+        return self._build_dataset(self._train_df, feature_order, means, stds)
+
+    def get_val_set(self, feature_order, means, stds):
+        return self._build_dataset(self._val_df, feature_order, means, stds)
+
+    def get_test_set(self, feature_order, means, stds):
+        return self._build_dataset(self._test_df, feature_order, means, stds)
+
+    def get_sets(self, feature_order, means, std):
+        return (
+            self.get_train_set(feature_order, means, std),
+            self.get_val_set(feature_order, means, std),
+            self.get_test_set(feature_order, means, std),
+        )
+
+    @classmethod
+    def from_tarball(cls, ticker, id):
+
+        dataset_fpath = os.path.join(
+            config.ML_DATA_DIR, ticker, '{}.tar'.format(id))
 
         with tempfile.TemporaryDirectory(prefix='options_data-') as tmpdir:
+
+            tarball_files = utils.extract_and_get_file_list(
+                dataset_fpath, tmpdir)
+
+            # Make sure all the files we need are there
+            for file in cls._files:
+                assert(file in tarball_files)
+
+            # Load the various datasets
+            train = pd.read_pickle(os.path.join(tmpdir, 'train.bz2'))
+            val = pd.read_pickle(os.path.join(tmpdir, 'val.bz2'))
+            test = pd.read_pickle(os.path.join(tmpdir, 'test.bz2'))
+
+            # ALso keep the metadata on hand
+            with open(os.path.join(tmpdir, 'metadata'), 'r') as MF:
+                metadata = json.load(MF)
+
+        return cls(ticker, train, val, test, metadata, id)
+
+    def to_tarball(self):
+        with tempfile.TemporaryDirectory(prefix='options_data-') as tmpdir:
             # Add the data to the archive
-            self._data.to_pickle(
-                os.path.join(tmpdir, 'dataframe'),
-                compression='bz2'
-            )
+            self._train_df.to_pickle(os.path.join(tmpdir, 'train.bz2'))
+            self._val_df.to_pickle(os.path.join(tmpdir, 'val.bz2'))
+            self._test_df.to_pickle(os.path.join(tmpdir, 'test.bz2'))
 
             # Add the metadata to the archive
             with open(os.path.join(tmpdir, 'metadata'), 'w') as MF:
-                json.dump(self._metadata, MF)
+                json.dump(self.metadata, MF)
 
             # Build the tarball
             out_path = self.get_dataset_path()
@@ -75,11 +116,106 @@ class OptionsDataset(object):
                 ['tar', '-C', tmpdir, '-cf', out_path] + self._files)
 
 
+class StrategyGenerator(object):
+    def __init__(self, min_profit, max_margin=None, randomize_legs=False):
+        self._max_margin = max_margin
+        self._min_profit = min_profit
+        self._randomize_legs = randomize_legs
+        self._generators = {}
+        self._current_gen = None
+        self._current_key = None
+
+    @property
+    def names(self):
+        return list(self._generators.keys())
+
+    @property
+    def total_strategies(self):
+        return len(self._generators)
+
+    def _strat_paths_to_generator(self, strat_paths):
+        np.random.shuffle(strat_paths)
+        for p in strat_paths:
+            yield pd.read_pickle(p)
+
+    def add_generators(self, strats_paths):
+
+        def path_to_name(p):
+            return os.path.split(p)[1].split('-')[0]
+
+        strats_dicts = {}
+
+        # Walk through the files and append them to their respective list of
+        # strategy DataFrame paths in the dictionary
+        for p in strats_paths:
+            try:
+                strats_dicts[path_to_name(p)].append(p)
+            except KeyError:
+                strats_dicts[path_to_name(p)] = [p]
+
+        for strat, paths in strats_dicts.items():
+            if strat not in self.names:
+                self._generators[strat] = []
+            self._generators[strat].append(
+                self._strat_paths_to_generator(paths))
+
+    def shuffle(self):
+        '''
+        Randomize each list of generators.
+        '''
+        for name in self.names:
+            random.shuffle(self._generators[name])
+
+    def reset(self, key=None):
+        '''
+        Move on to a new generator and throw away the previous one.
+        '''
+        if key is None:
+            if self._current_key is None:
+                raise ValueError(
+                    ('A key must be provided to begin using a '
+                     'StrategyGenerator')
+                )
+            key = self._current_key
+        else:
+            self._current_key = key
+
+        self._current_gen = self._generators[key].pop(0)
+
+    def collect_data(self):
+
+        # Keep searching until we get a dataframe with applicable data
+        while True:
+            try:
+                df = next(self._current_gen)
+            except StopIteration:
+                # We're exhausted the current generator, so move on to the
+                # next one
+                self.reset()
+                df = next(self._current_gen)
+
+            if self._max_margin is not None:
+                df = df[df.open_margin <= self._max_margin]
+
+            if df.shape[0] != 0:
+                # Ok, we've got something to return
+                break
+
+        winning_indices = df.max_profit >= self._min_profit
+
+        # Randomize the leg order to make the model more robust
+        if self._randomize_legs:
+            utils.randomize_legs_columns(df)
+
+        return df[winning_indices], df[~winning_indices]
+
+
 def build_dataset(
     ticker,
     max_margin=None,
     min_profit=0,
     total_datapoints=1*10**6,
+    train_val_test_split=[0.9, 0.05, 0.05],
     loss_ratio=1,
     randomize_legs=False,
     hard_winners=False,
@@ -98,179 +234,183 @@ def build_dataset(
     # to go about building the final metadata dict, since more metadata will
     # likely be added or removed later on, but the below information is likely
     # to be static.
-    for k in ['save', 'verbose']:
+    for k in ['save', 'verbose', 'train_val_test_split']:
         del metadata[k]
 
     def log(msg):
         if verbose:
             print(msg)
 
-    # We must add the fee for each trade (open and close) to
-    strategy_generators = {}
-    strats_dfs = {'win': {}, 'loss': {}}
-    enough_wins = False
-    enough_losses = False
+    def get_dataframe(strat_gen, n_examples):
 
-    log('Winning profit: {}'.format(min_profit * 100))
+        # We must add the fee for each trade (open and close) to
+        strat_names = strat_gen.names
+        win_dict = {n: None for n in strat_names}
+        loss_dict = {n: None for n in strat_names}
+        enough_wins = False
+        enough_losses = False
 
-    # Get the paths to the available spreads tarballs
-    data_dir = os.path.join(config.SPREADS_DIR, ticker)
-    tarball_paths = (os.path.join(data_dir, f) for f in os.listdir(data_dir)
-                     if f.endswith('.tar'))
-
-    # Extract all of the available strategy DataFrames for all available
-    # expiries into one directory
-    with tempfile.TemporaryDirectory(prefix='options_examples') as tmpdir:
-        file_list = []
-        for p in tarball_paths:
-            # Extract it and get the file list
-            file_list += list(map(
-                lambda f: os.path.join(tmpdir, f),
-                utils.extract_and_get_file_list(p, tmpdir)
-            ))
-
-        # Convert each list of strategies into a generator of DataFrames for
-        # that strategy
-        strategy_generators = strats_paths_to_generators(file_list)
-
-        strat_names = list(strategy_generators.keys())
-
-        # Now that we know the names of the unique strategies, we can count how
-        # many there are ...
-        total_strategies = len(strat_names)
-
-        # ... determine how many winners and losers are needed for each
-        # strategy ...
         win_frac = 1/(loss_ratio + 1)
-        min_wins = int((total_datapoints * win_frac) / total_strategies)
-        min_losses = int((total_datapoints * (1 - win_frac)) / total_strategies)
+        total_strategies = strat_gen.total_strategies
 
-        win_pool_size = min_wins * \
-            (1 if not hard_winners else win_pool_multiplier)
-        loss_pool_size = min_losses * \
-            (1 if not hard_losers else loss_pool_multiplier)
+        # The count may be updated if there are not enough datapoints to
+        # fulfill the original request.
+        count = n_examples
+        def get_vals():
+            min_wins = int((count * win_frac) / total_strategies)
+            min_losses = int((count * (1 - win_frac)) / total_strategies)
+            win_pool_size = min_wins * \
+                (1 if not hard_winners else win_pool_multiplier)
+            loss_pool_size = min_losses * \
+                (1 if not hard_losers else loss_pool_multiplier)
+            return min_wins, min_losses, win_pool_size, loss_pool_size
+
+        min_wins, min_losses, win_pool_size, loss_pool_size = get_vals()
 
         log('Min wins: {}'.format(min_wins))
         log('Min losses: {}'.format(min_losses))
 
-        # ... and prepare the win/loss dictionary with their names.
-        for name in strat_names:
-            strats_dfs['win'][name] = None
-            strats_dfs['loss'][name] = None
-
-        # A little helper function to get a new (win, lose) DataFrame tuple for
-        # a specific strategy
-        def collect_strategy_data(key):
-            df = next(strategy_generators[key])
-
-            if max_margin is not None:
-                df = df[df.open_margin <= max_margin]
-
-            if df.shape[0] == 0:
-                return None, None
-
-            winning_indices = df.max_profit >= min_profit
-
-            # Randomize the leg order to make the model more robust
-            if randomize_legs:
-                utils.randomize_legs_columns(df)
-
-            return df[winning_indices], df[~winning_indices]
-
         for strat in strat_names:
             log('Collecting {}'.format(strat.replace('_', ' ')))
 
+            # Reset the global generator so that we know the next DataFrame
+            # generated will contain the strategy we're looking for
+            strat_gen.reset(strat)
+
+            total_wins = 0
+            total_losses = 0
+
             while True:
 
-                # Figure out which types of trades must be collected
-                try:
-                    current_wins = strats_dfs['win'][strat].shape[0]
-                except AttributeError:
-                    current_wins = 0
-                try:
-                    current_losses = strats_dfs['loss'][strat].shape[0]
-                except AttributeError:
-                    current_losses = 0
-
-                enough_wins = current_wins >= win_pool_size
-                enough_losses = current_losses >= loss_pool_size
-
+                # Only continue looking for trades of this type if we're missing
+                # data, otherwise move on to the next type.
+                enough_wins = total_wins >= win_pool_size
+                enough_losses = total_losses >= loss_pool_size
                 if enough_wins and enough_losses:
                     break
 
-                try:
-                    strat_wins, strat_losses = collect_strategy_data(strat)
-                except StopIteration:
-                    # There weren't enough elements to fulfil the request.
-                    # Continue on, assuming the new values for minimum wins and
-                    # losses based on whatever we were able to find from this
-                    # strategy.
-                    count = int((total_wins * total_strategies) / win_frac)
-                    log('Only {} wins available. Resetting count to {}'.format(
-                            total_wins, count))
-
-                    min_wins = int((count * win_frac) / total_strategies)
-                    min_losses = int((count * (1 - win_frac))
-                                        / total_strategies)
-
-                    win_pool_size = min_wins * \
-                        (1 if not hard_winners else win_pool_multiplier)
-                    loss_pool_size = min_losses * \
-                        (1 if not hard_losers else loss_pool_multiplier)
-
-                    log('Min wins: {}'.format(min_wins))
-                    log('Min losses: {}'.format(min_losses))
-                    break
-
+                # Collect the data and add what we're missing to its respective
+                # dataframe.
+                strat_wins, strat_losses = strat_gen.collect_data()
                 if not enough_wins and strat_wins is not None:
-                    strats_dfs['win'][strat] = pd.concat((
-                        strats_dfs['win'][strat], strat_wins))
+                    win_dict[strat] = pd.concat((
+                        win_dict[strat], strat_wins))
                 if not enough_losses and strat_losses is not None:
-                    strats_dfs['loss'][strat] = pd.concat((
-                        strats_dfs['loss'][strat], strat_losses))
+                    loss_dict[strat] = pd.concat((
+                        loss_dict[strat], strat_losses))
 
+                # Update the counts to figure out which types of trades must be
+                # collected next round.
                 try:
-                    total_wins = strats_dfs['win'][strat].shape[0]
+                    total_wins = win_dict[strat].shape[0]
                 except AttributeError:
-                    total_wins = 0
+                    pass
                 try:
-                    total_losses = strats_dfs['loss'][strat].shape[0]
+                    total_losses = loss_dict[strat].shape[0]
                 except AttributeError:
-                    total_losses = 0
+                    pass
+
                 log('\twins: {:<8} ({:.1%})\tlosses: {:<8} ({:.1%})'.format(
                     total_wins, total_wins / win_pool_size,
                     total_losses, total_losses / loss_pool_size))
 
-            # If desired, sort the winners such that they are in order of smallest
-            # max_profit to largest max_profit.
+            # If desired, sort the winners such that they are in order of
+            # smallest max_profit to largest max_profit.
             if hard_winners:
-                strats_dfs['win'][strat].sort_values(
+                win_dict[strat].sort_values(
                     by='max_profit', ascending=True, inplace=True)
-            strats_dfs['win'][strat] = strats_dfs['win'][strat][:min_wins]
+            win_dict[strat] = win_dict[strat][:min_wins]
+
             # If desired, sort the losers such that they are in order of largest
             # max_profit to smallest max_profit.
             if hard_losers:
-                strats_dfs['loss'][strat].sort_values(
+                loss_dict[strat].sort_values(
                     by='max_profit', ascending=False, inplace=True)
-            strats_dfs['loss'][strat] = strats_dfs['loss'][strat][:min_losses]
+            loss_dict[strat] = loss_dict[strat][:min_losses]
 
-    # Concat all of the DataFrames
-    df = pd.concat(
-        [d for d in strats_dfs['win'].values()] +
-        [d for d in strats_dfs['loss'].values()]
+        # Concat all of the DataFrames for all of the strategy types and wins
+        # and losses.
+        df = pd.concat(
+            [d for d in win_dict.values()] +
+            [d for d in loss_dict.values()]
+        )
+
+        # Give the final DataFrame the expected columns.
+        log('Processing trades')
+        df = utils.process_trades_df(df)
+
+        return df
+
+    # Get the paths to the available spreads tarballs
+    spreads_dir = os.path.join(config.SPREADS_DIR, ticker)
+    stats_df = pd.read_pickle(os.path.join(spreads_dir, 'stats'))
+    expiries = stats_df.index.unique(level=0).values
+    random.shuffle(expiries)
+
+    strat_gen = StrategyGenerator(
+        min_profit=min_profit,
+        max_margin=max_margin,
+        randomize_legs=randomize_legs
     )
 
-    log('Processing trades')
-    df = utils.process_trades_df(df)
+    # Now we want to turn all of these expiries into a dict of lists of
+    # generators. The dict is keyed by strategy type and then each entry of the
+    # lists is a generator for all dataframes for that strategy type for a
+    # specific expiry.
+    with tempfile.TemporaryDirectory(prefix='options_examples') as tmpdir:
+        for e in expiries:
+            # Figure out where this tarball exists
+            tarball_path = os.path.join(spreads_dir, '{}.tar'.format(e))
 
-    metadata['total_datapoints'] = df.shape[0]
+            # Make a sub-directory just for this expiry so the utility function
+            # can parse it into generators
+            exp_tmp_dir = os.path.join(tmpdir, e)
+            os.mkdir(exp_tmp_dir)
 
-    # Load up a dataset object
-    dataset = OptionsDataset(ticker, df=df, metadata=metadata)
+            # Get the full list of files from this expiry
+            file_list = list(map(
+                lambda f: os.path.join(exp_tmp_dir, f),
+                utils.extract_and_get_file_list(tarball_path, exp_tmp_dir)
+            ))
+
+            # Add the generators for each strategy for this expiry into the
+            # dictionary
+            strat_gen.add_generators(file_list)
+
+        strat_gen.shuffle()
+
+        n_train = int(total_datapoints * train_val_test_split[0])
+        n_val = int(total_datapoints * train_val_test_split[1])
+        n_test = int(total_datapoints * train_val_test_split[2])
+
+        log('Winning profit : ${:7>.2f}'.format(min_profit * 100))
+        log('Max margin     : ${:7>.2f}'.format(max_margin * 100))
+
+        # We now have all the generators we need, so use them to fulfil the
+        # requirements of each of the consituent datasets.
+        # NOTE: the get_dataframe() function pops out generators such that
+        #       one strategy type for one expiry will only ever appear in one
+        #       dataset. This prevents cross-contamination.
+        log('Collecting {} training datapoints.'.format(n_train))
+        train_df = get_dataframe(strat_gen, n_train)
+        log('Collecting {} validation datapoints.'.format(n_val))
+        val_df = get_dataframe(strat_gen, n_val)
+        log('Collecting {} test datapoints.'.format(n_test))
+        test_df = get_dataframe(strat_gen, n_test)
+
+    metadata['n_train'] = train_df.shape[0]
+    metadata['n_val'] = val_df.shape[0]
+    metadata['n_test'] = test_df.shape[0]
+
+    log('Creating OptionsDataset')
+
+    # Generate up a dataset object
+    dataset = OptionsDataset(ticker, train_df, val_df, test_df, metadata)
 
     # Save the final dataset if requested.
     if save:
-        dataset.save()
+        log('Saving dataset')
+        dataset.to_tarball()
 
     return dataset
 
@@ -301,8 +441,9 @@ def get_dataset_details(ticker):
         datasets_meta).sort_values(by='id').reset_index(drop=True)
 
 def load_dataset(ticker, **kwargs):
+    verbose = kwargs.pop('verbose', False)
     def log(msg):
-        if not kwargs.get('verbose', False): return
+        if not verbose: return
         print(msg)
 
     datasets = get_dataset_details(ticker)
@@ -313,36 +454,32 @@ def load_dataset(ticker, **kwargs):
         kwargs['save'] = True
         return build_dataset(ticker, **kwargs)
 
-    # Narrow down by the high-level details
-    if 'max_margin' in kwargs:
-        datasets = datasets[datasets.max_margin == kwargs['max_margin']]
-    if 'min_profit' in kwargs:
-        datasets = datasets[datasets.min_profit == kwargs['min_profit']]
-    if 'total_datapoints' in kwargs:
-        # Find a reasonably-close number of datapoints (within 10% on either
-        # side)
-        count = kwargs['total_datapoints']
-        datasets = datasets[
-            (datasets.total_datapoints >= count / 1.1)
-                & (datasets.total_datapoints <= count * 1.1) ]
-    if 'loss_ratio' in kwargs:
-        datasets = datasets[datasets.loss_ratio == kwargs['loss_ratio']]
+    # Narrow down by the money details
+    datasets = datasets[
+        (datasets.max_margin == kwargs.pop('max_margin', np.inf))
+        & (datasets.min_profit == kwargs.pop('min_profit', 0))
+    ]
+
+    # Narrow down by the remaining arguments
+    for key, val in kwargs.items():
+        # Find datasets that are reasonably close to this value
+        column = datasets[key]
+        datasets = datasets[(column >= val / 1.1) & (column <= val * 1.1)]
 
     # Do we have anything that fits the bill?
     if datasets.shape[0] > 0:
-        log('Loading largest dataset.')
         # Load the largest dataset we can find.
+        log('Loading largest dataset.')
         info = datasets.iloc[datasets.total_datapoints.argmax()]
-        if kwargs.get('verbose', False):
-            print(info)
-        return OptionsDataset(ticker, id=info.id)
+        log(info)
+        return OptionsDataset.from_tarball(ticker, id=info.id)
     else:
         # Generate a stock-standard set of data if nothing is available.
         log('No available matching datasets. Building.')
         # Make sure to save the data, since nothing currently exists that meet
         # this criteria
         kwargs['save'] = True
-        return build_dataset(ticker, **kwargs)
+        return build_dataset(ticker, verbose=verbose, **kwargs)
 
 def _get_parser():
     parser = argparse.ArgumentParser()
@@ -356,6 +493,11 @@ def _get_parser():
     parser.add_argument(
         '-t', '--total-datapoints', type=int, default=1*10**6,
         help='The total number of examples that must be generated.')
+    parser.add_argument(
+        '-s', '--split', type=float, nargs=3, default=[0.9, 0.05, 0.05],
+        help=('The percent values of the data to be reserved for train, '
+              'validation and test, respectively. NOTE: these are decimal '
+              'values, so use 0.9 rather than 90.'))
     parser.add_argument(
         '-l', '--loss-ratio', type=float, default=1,
         help='The number of losses to obtain for each win of a given strategy')
@@ -388,10 +530,12 @@ def main(args=None):
     parser = _get_parser()
     args = vars(parser.parse_args(args))
 
-    # Do a bit of reformatting of the difficult and pooling args
+    # Do a bit of reformatting of the difficult and pooling args as well as the
+    # data split
     args['hard_winners'], args['hard_losers'] = args.pop('difficult')
     (args['win_pool_multiplier'],
      args['loss_pool_multiplier']) = args.pop('pool_multiplier')
+    args['train_val_test_split'] = args.pop('split')
 
     # Always save the dataset when being run from script.
     args['save'] = True
