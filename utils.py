@@ -188,9 +188,20 @@ def extract_and_get_file_list(tarball_path, output_dir):
         ['tar', '-C', output_dir, '-xvf', tarball_path])
     return sorted(files_bytes.decode('utf-8').strip().split('\n'))
 
-def add_timestamp_columns(df):
-    # Insert a colum which is the expiry in epoch timestamp form
-    df.insert(0, 'expiry_timestamp', df.expiry.map(get_epoch_timestamp))
+def process_trades_df(df):
+    # Insert columns related to the expiry which represent the day of week and
+    # the week of the month (with respect to the friday).
+    expiry = df.iloc[0].expiry
+    df.insert(
+        0,
+        'expiry_dow',
+        int(expiry.isoweekday())
+    )
+    df.insert(
+        0,
+        'expiry_wom',
+        int(np.floor((expiry.day - expiry.weekday() + 3.9) / 7) + 1)
+    )
 
     # Insert a column which is the open_time in the form of an integer
     # representing the number of minutes until expiry
@@ -203,7 +214,8 @@ def add_timestamp_columns(df):
         )
     )
 
-def add_options_type_categories(df):
+    # Letters aren't very useful for a model, so add a column with a number
+    # representation of the option type
     option_val = 1 if df.iloc[0].leg1_type == 'C' else -1
     for i in range(1, config.TOTAL_LEGS + 1):
         df.insert(
@@ -212,9 +224,6 @@ def add_options_type_categories(df):
             option_val if df['leg{}_strike'.format(i)].iloc[0] != 0 else 0
         )
 
-def process_trades_df(df):
-    add_timestamp_columns(df)
-    add_options_type_categories(df)
     return sort_trades_df_columns(df)
 
 def spreads_tarballs_to_generator(tarball_paths, count=None, shuffle=True):

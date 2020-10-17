@@ -83,7 +83,8 @@ BASE_FEE        = 13
 HEADER_COLS     = [
     'description',
     'expiry',
-    'expiry_timestamp',
+    'expiry_dow',
+    'expiry_wom',
     'open_time',
     'seconds_to_expiry',
     'stock_price',

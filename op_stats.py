@@ -6,7 +6,10 @@ import utils
 
 def set_standard_static_stats(means, variances):
     # We want some columns to avoid (further) normalization.
-    no_norm = []
+    no_norm = [
+        'expiry_dow',
+        'expiry_wom',
+    ]
 
     # Leg type category columns should not be normalized and neither should the
     # logs of the price values.
