@@ -435,7 +435,7 @@ def butterfly_spread_worker(
     # done
     output_q.put(DONE)
 
-def filesystem_worker(
+def postprocessing_worker(
     id,
     input_q,
     finish_fn,
@@ -603,7 +603,7 @@ def collect_spreads(
 
                 for i in range(procs_pairs):
                     p = multiprocessing.Process(
-                        target=filesystem_worker,
+                        target=postprocessing_worker,
                         args=(i,
                                 working_q,
                                 add_to_queue,
