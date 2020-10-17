@@ -87,8 +87,7 @@ def load_spreads(
 
     log('Building spreads.')
 
-    spreads_gen = tp.collect_spreads_generator(
-        options_df, verbose=verbose-1, generator=True)
+    spreads_gen = tp.collect_spreads(options_df, verbose=verbose-1)
 
     # We want to make sure that the data is adequately shuffled so that when
     # it's loaded later on, we don't have a full block of essentially the same
