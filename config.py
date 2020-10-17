@@ -96,6 +96,7 @@ LEG_COLUMNS_TEMPLATE = '''
     leg{num}_type
     leg{num}_type_cat
     leg{num}_strike
+    leg{num}_action
     leg{num}_credit
     leg{num}_volume
     leg{num}_volatility

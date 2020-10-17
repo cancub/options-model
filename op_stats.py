@@ -5,9 +5,15 @@ import config
 import utils
 
 def set_standard_static_stats(means, variances):
-    # Leg type category columns should not be normalized
-    cat_tmp = 'leg{}_type_cat'
-    for c in (cat_tmp.format(i) for i in range(1, config.TOTAL_LEGS + 1)):
+    # We want some columns to avoid (further) normalization.
+    no_norm = []
+
+    # Leg type category columns should not be normalized and neither should the
+    # logs of the price values.
+    for leg_col in ['leg{}_type_cat', 'leg{}_action']:
+        no_norm += [leg_col.format(i) for i in range(1, config.TOTAL_LEGS + 1)]
+
+    for c in no_norm:
         try:
             means[c] = 0
             variances[c] = 1

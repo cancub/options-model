@@ -152,8 +152,10 @@ def call_put_spread_worker(
         leg1_meta.drop(['bidPrice'], axis=1, inplace=True)
         leg2_meta.drop(['askPrice', 'stock_price'], axis=1, inplace=True)
 
-        # Flip the sign of the askPrice for the first leg
-        leg1_meta.askPrice *= -1
+        # Any models will need to know if we are buying or selling this leg, so
+        # add in this column (BUY = 1, SELL = -1).
+        leg1_meta.insert(0, 'action', 1)
+        leg2_meta.insert(0, 'action', -1)
 
         # Change the other name to simply "credit." After inverting the value
         # for the ask price above, it's obvious whether it's a bid or an ask
@@ -376,15 +378,18 @@ def butterfly_spread_worker(
                 zip(all_open_times, leg4_strikes)].reset_index(drop=True)
 
             # There are the credits for the opens. Since we're buying legs 1 (A)
-            # and 4 (C), we get rid of their bidPrices and we invert the
-            # askPrice. Additionally, we only want to store the stock price
-            # column once, so pop it from the first leg for storage and drop it
-            # in the remaining legs.
+            # and 4 (C), we get rid of their bidPrices. Additionally, we only
+            # want to store the stock price column once, so pop it from the
+            # first leg for storage and drop it in the remaining legs.
             prices_series = leg1_meta.pop('stock_price')
             leg1_meta.drop(['bidPrice'], axis=1, inplace=True)
             leg4_meta.drop(['bidPrice', 'stock_price'], axis=1, inplace=True)
-            leg1_meta.askPrice *= -1
-            leg4_meta.askPrice *= -1
+
+            # Any models will need to know if we are buying or selling this
+            # leg, so add in this column (BUY = 1, SELL = -1).
+            leg1_meta.insert(0, 'action', 1)
+            leg4_meta.insert(0, 'action', 1)
+            leg2_meta.insert(0, 'action', -1)
 
             # Meanwhile, we're selling legs 2 and 3, so get rid of the askPrice
             leg2_meta.drop(['askPrice', 'stock_price'], axis=1, inplace=True)
