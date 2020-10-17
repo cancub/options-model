@@ -531,10 +531,8 @@ def collect_spreads_generator(
     procs_pairs=5,
     max_margin=config.MARGIN,
     get_max_profit=True,
-    max_spreads_per_file=25000,
-    generator=False,
+    dataframe_save_threshold=25000,
     verbose=0,
-    debug=False
 ):
 
     def log(message):
@@ -578,71 +576,69 @@ def collect_spreads_generator(
             bid_df = option_type_df['bidPrice'].unstack(level=[1])
             ask_df = option_type_df['askPrice'].unstack(level=[1])
 
-            if not debug:
-                for collecter in (call_put_spread_worker,
-                                  butterfly_spread_worker):
-                    # Load in the list of strikes so that the threads can pull
-                    # them out
-                    for s in ask_df.columns:
-                        strikes_q.put(s)
+            for collecter in (call_put_spread_worker,
+                                butterfly_spread_worker):
+                # Load in the list of strikes so that the threads can pull
+                # them out
+                for s in ask_df.columns:
+                    strikes_q.put(s)
 
-                    processes = []
-                    for i in range(procs_pairs):
-                        p = multiprocessing.Process(
-                            target=collecter,
-                            args=(i,
-                                  option_type_df,
-                                  bid_df,
-                                  ask_df,
-                                  prices_df,
-                                  strikes_q,
-                                  working_q,
-                                  get_max_profit,
-                                  max_margin,
-                                  verbose>1,)
-                        )
-                        p.start()
-                        processes.append(p)
+                processes = []
+                for i in range(procs_pairs):
+                    p = multiprocessing.Process(
+                        target=collecter,
+                        args=(i,
+                                option_type_df,
+                                bid_df,
+                                ask_df,
+                                prices_df,
+                                strikes_q,
+                                working_q,
+                                get_max_profit,
+                                max_margin,
+                                verbose>1,)
+                    )
+                    p.start()
+                    processes.append(p)
 
-                    for i in range(procs_pairs):
-                        p = multiprocessing.Process(
-                            target=filesystem_worker,
-                            args=(i,
-                                  working_q,
-                                  add_to_queue,
-                                  expiry_dt,
-                                  max_spreads_per_file,
-                                  o,
-                                  verbose>1,)
-                        )
-                        p.start()
-                        processes.append(p)
+                for i in range(procs_pairs):
+                    p = multiprocessing.Process(
+                        target=filesystem_worker,
+                        args=(i,
+                                working_q,
+                                add_to_queue,
+                                expiry_dt,
+                                dataframe_save_threshold,
+                                o,
+                                verbose>1,)
+                    )
+                    p.start()
+                    processes.append(p)
 
-                    finished_count = 0
-                    # Move on to the next set in response to N spread
-                    # workers quitting
-                    while finished_count < procs_pairs:
-                        label, df = output_q.get()
+                finished_count = 0
+                # Move on to the next set in response to N spread
+                # workers quitting
+                while finished_count < procs_pairs:
+                    label, df = output_q.get()
 
-                        if label == DONE:
-                            finished_count += 1
-                            continue
+                    if label == DONE:
+                        finished_count += 1
+                        continue
 
-                        # Give the calling process what it wants
-                        log('yielding')
-                        yield (label, df)
+                    # Give the calling process what it wants
+                    log('yielding')
+                    yield (label, df)
 
-                    for p in processes:
-                        p.join()
+                for p in processes:
+                    p.join()
 
 def collect_spreads_saver(
     options_df,
     procs_pairs=5,
     max_margin=config.MARGIN,
     get_max_profit=True,
-    max_spreads_per_file=25000,
+    dataframe_save_threshold=25000,
     verbose=0,
-    debug=False
 ):
 
     def log(message):
@@ -702,47 +698,46 @@ def collect_spreads_saver(
             bid_df = option_type_df['bidPrice'].unstack(level=[1])
             ask_df = option_type_df['askPrice'].unstack(level=[1])
 
-            if not debug:
-                for collecter in (call_put_spread_worker,
-                                  butterfly_spread_worker):
-                    # Load in the list of strikes so that the threads can pull
-                    # them out
-                    for s in ask_df.columns:
-                        strikes_q.put(s)
+            for collecter in (call_put_spread_worker,
+                                butterfly_spread_worker):
+                # Load in the list of strikes so that the threads can pull
+                # them out
+                for s in ask_df.columns:
+                    strikes_q.put(s)
 
-                    processes = []
-                    for i in range(procs_pairs):
-                        p = multiprocessing.Process(
-                            target=collecter,
-                            args=(i,
-                                  option_type_df,
-                                  bid_df,
-                                  ask_df,
-                                  prices_df,
-                                  strikes_q,
-                                  working_q,
-                                  get_max_profit,
-                                  max_margin,
-                                  verbose>1,)
-                        )
-                        p.start()
-                        processes.append(p)
+                processes = []
+                for i in range(procs_pairs):
+                    p = multiprocessing.Process(
+                        target=collecter,
+                        args=(i,
+                                option_type_df,
+                                bid_df,
+                                ask_df,
+                                prices_df,
+                                strikes_q,
+                                working_q,
+                                get_max_profit,
+                                max_margin,
+                                verbose>1,)
+                    )
+                    p.start()
+                    processes.append(p)
 
-                    for i in range(procs_pairs):
-                        p = multiprocessing.Process(
-                            target=filesystem_worker,
-                            args=(i,
-                                  working_q,
-                                  save_df,
-                                  expiry_dt,
-                                  max_spreads_per_file,
-                                  o,
-                                  verbose>1,)
-                        )
-                        p.start()
-                        processes.append(p)
+                for i in range(procs_pairs):
+                    p = multiprocessing.Process(
+                        target=filesystem_worker,
+                        args=(i,
+                                working_q,
+                                save_df,
+                                expiry_dt,
+                                dataframe_save_threshold,
+                                o,
+                                verbose>1,)
+                    )
+                    p.start()
+                    processes.append(p)
 
-                    for p in processes:
-                        p.join()
+                for p in processes:
+                    p.join()
 
     return tmpdir
