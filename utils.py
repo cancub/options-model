@@ -28,6 +28,22 @@ def _get_column_name_list(shuffle=False):
         config.LEG_COLUMNS_TEMPLATE.format(num=leg_order.pop(0))
     ).split()
 
+def forward_looking_maximum(df):
+    # Get the forward-looking maximum credit by reversing the
+    # values, applying a cumulative maximum, then flipping the
+    # result.
+    #       1,   0,   2,   1,   5,   0
+    #       0,   5,   1,   2,   0,   1   (flip)
+    #       0,   5,   5,   5,   5,   5   (cummax)
+    #       5,   5,   5,   5,   5,   0   (flip)
+    return pd.DataFrame(
+        data=np.flip(
+            np.maximum.accumulate(
+                np.flip(df.values))),
+        columns=df.columns,
+        index=df.index
+    )
+
 def get_last_backup_path():
     fnames = (b for b in os.listdir(config.BACKUPS_DIR) if b.endswith('.tar'))
     return os.path.abspath(os.path.join(config.BACKUPS_DIR, sorted(fnames)[-1]))
@@ -56,12 +72,7 @@ def load_options(ticker, expiry=None):
 
     return df
 
-def load_spreads(
-    ticker,
-    expiry,
-    refresh=False,
-    verbose=0
-):
+def load_spreads(ticker, expiry, refresh=False, verbose=0):
     def log(msg):
         if verbose < 1: return
         print(msg)
