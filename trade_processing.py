@@ -56,14 +56,15 @@ def vertical_spread_worker(
 
         leg2_strikes = all_strikes[all_strikes != leg1_strike]
 
-        leg1_asks = ask_df[leg1_strike]
+        leg1_ask_s = ask_df[leg1_strike]
+        leg1_bid_s = bid_df[leg1_strike]
 
         # The second leg cannot include the first leg strike
         leg2_bid_df = bid_df[leg2_strikes]
         leg2_ask_df = ask_df[leg2_strikes]
 
         # Figure out how much margin we'd need for this trade.
-        open_margins = leg2_bid_df.add(leg1_asks, axis='rows')
+        open_margins = leg2_bid_df.add(leg1_ask_s, axis='rows')
 
         # Pretend that the too-expensive trades don't exist
         if max_margin is not None:
@@ -80,7 +81,7 @@ def vertical_spread_worker(
             # receive from the second.
             # NOTE: leave NaN in place to symbolize that this is not a viable
             #       trade. These trades will be removed at the end.
-            open_credits = leg2_bid_df.sub(leg1_asks, axis='rows')
+            open_credits = leg2_bid_df.sub(leg1_ask_s, axis='rows')
 
             # When looking at the close credits, make sure to replace NaN with 0
             # on the close sides, because NaN implies the trade was worthless.
@@ -90,7 +91,7 @@ def vertical_spread_worker(
             # NOTE: make this 0.01 for the leg 2 side since if we want to close
             #       early, we'd actually need to sell it for something.
             close_credits = (-leg2_ask_df.fillna(0.01)).add(
-                                bid_df[leg1_strike].fillna(0), axis='rows')
+                                leg1_bid_s.fillna(0), axis='rows')
 
             # Get the maximum profit less fees
             max_profits = open_credits \
@@ -181,11 +182,13 @@ def vertical_spread_worker(
         # processing.
         butterfly_q.put((
             base_df.copy(),
-            leg2_bid_df,
-            leg2_ask_df,
-            open_margins,
-            open_credits,
-            close_credits,
+            leg1_bid_s.copy(),
+            leg1_ask_s.copy(),
+            leg2_bid_df.copy(),
+            leg2_ask_df.copy(),
+            open_margins.copy(),
+            open_credits.copy(),
+            close_credits.copy(),
         ))
 
         # Continue building the completed DataFrame wiht the strikes for
@@ -236,12 +239,17 @@ def butterfly_spread_worker(
     max_margin=None,
     verbose=False
 ):
-    def log(message):
+    def log(message, long=None):
         if not verbose: return
+        side = ''
+        if long is not None:
+            side = 'LONG' if long else 'SHORT'
+
         logging.debug(
-            '{hdr} {msg}'.format(
+            '{hdr} {msg} {side}'.format(
                 hdr=HEADER_TEMPLATE.format(name='BFLY_COLLECTOR', id=id),
-                msg = message
+                msg = message,
+                side=side
             ))
 
     log('START')
@@ -263,6 +271,8 @@ def butterfly_spread_worker(
         # the pipeline have made for us.
         try:
             (source_df,
+             leg1_bid_s,
+             leg1_ask_s,
              leg2_bid_df,
              leg2_ask_df,
              base_open_margins,
@@ -282,58 +292,83 @@ def butterfly_spread_worker(
         # received.
         leg1_strike = source_df.loc[0, 'leg1_strike']
 
-        # Duplicate all leg 2 data since it's being used for leg 3 as well
-        for c in (c for c in source_df.columns if 'leg2' in c):
-            source_df.insert(0, c.replace('2', '3'), source_df[c])
+        # We'll be working on both short and long butterflies
+        source_dfs = {s: source_df.copy() for s in ('short', 'long')}
 
-        # The remainder of the code is going to need to get the details on legs
-        # 1 through 3 for specific timepoints. Facilitate this by using this
-        # information as the index of the source DataFrame.
-        source_df.set_index(
-            ['open_time', 'leg1_strike', 'leg2_strike'],
-            inplace=True
-        )
+        for side in source_dfs.keys():
+            mid_leg_num = '1' if side == 'short' else '2'
+            leg_name = 'leg{}'.format(mid_leg_num)
+
+            # Duplicate all middle leg to be be used for leg 3 as well.
+            for c in filter(lambda c: leg_name in c, source_df.columns):
+                source_dfs[side].insert(
+                    0,
+                    c.replace(mid_leg_num, '3'),
+                    source_df[c]
+                )
+
+            # The remainder of the code is going to need to get the details on
+            # legs 1 through 3 for specific timepoints. Facilitate this by using
+            # setting the index of the source DataFrames.
+            source_dfs[side].set_index(
+                ['open_time', 'leg1_strike', 'leg2_strike'],
+                inplace=True
+            )
 
         # Walk through each of the (leg 1, leg 2) combinations, treating
         # them as we did leg 1 in the vertical spread worker. That is, take legs
         # 1 through 3 as constant and work with all of the possible leg 4s.
         for leg2_strike, open_margins_12 in base_open_margins.items():
 
+            leg2_ask_s = leg2_ask_df[leg2_strike]
+            leg2_bid_s = leg2_bid_df[leg2_strike]
+
+            count_msg = 'count({},{},:) ='.format(
+                int(leg1_strike), int(leg2_strike))
+
             # We need to figure out if leg 1 is higher or lower than leg 2 and
             # then we want to find all of the strikes which would complete the
-            # butterfly (i.e., those on the other side).
-            if leg2_strike > leg1_strike:
-                leg4_strikes = all_strikes[all_strikes > leg2_strike]
-                count_msg = 'count({},{},:) ='.format(
-                    int(leg1_strike), int(leg2_strike))
+            # butterfly (i.e., those more expensive thatn the middle strike).
+            long_bfly = leg2_strike > leg1_strike
+            if long_bfly:
+                middle_strike = leg2_strike
             else:
-                leg4_strikes = all_strikes[all_strikes < leg2_strike]
-                count_msg = 'count(:,{},{}) ='.format(
-                    int(leg2_strike), int(leg1_strike))
+                middle_strike = leg1_strike
+
+            leg4_strikes = all_strikes[all_strikes > middle_strike]
 
             if len(leg4_strikes) == 0:
-                log('{} 0'.format(count_msg))
+                log('{} 0'.format(count_msg), long_bfly)
                 continue
 
             # We only want to look at times where the middle strike was at least
             # somewhat close to the price of the underlying security.
-            low_enough = (-local_windows + leg2_strike) <= prices_df
-            high_enough = (local_windows + leg2_strike) >= prices_df
+            low_enough = (-local_windows + middle_strike) <= prices_df
+            high_enough = (local_windows + middle_strike) >= prices_df
+
             valid_opens = prices_df[low_enough & high_enough].index
 
             if len(valid_opens) == 0:
-                log('{} 0'.format(count_msg))
+                log('{} 0'.format(count_msg), long_bfly)
                 continue
 
-            # Double the margin that leg 2 contributes to the trade.
-            open_margins_123 = open_margins_12 + leg2_bid_df[leg2_strike]
-
-            # We are buying the fourth leg to open and selling it to close.
             leg4_ask_df = ask_df[leg4_strikes]
             leg4_bid_df = bid_df[leg4_strikes]
 
-            # Figure out how much margin we'd need to open each of the trades.
-            open_margins = leg4_ask_df.add(open_margins_123, axis='rows')
+            if long_bfly:
+                midleg_margin = leg2_bid_s
+                leg4_open_margin = leg4_ask_df
+            else:
+                midleg_margin = leg1_ask_s
+                leg4_open_margin = leg4_bid_df
+
+            # Double the margin that the middle leg that contributes to the
+            # trade then add to the leg 4 margin to get the total margin for the
+            # butterfly.
+            open_margins = leg4_open_margin.add(
+                open_margins_12 + midleg_margin,
+                axis='rows'
+            )
 
             # Pretend that the too-expensive trades don't exist
             if max_margin is not None:
@@ -345,27 +380,44 @@ def butterfly_spread_worker(
             ).to_frame(name='open_margin')
 
             if base_open_credits is not None:
+
+                if long_bfly:
+                    # Selling leg 2 again, so we get a positive credit from
+                    # people bidding for the option.
+                    midleg_open_credit = leg2_bid_s
+                    midleg_close_credit = -leg2_ask_s.fillna(0.01)
+                    # Buying leg 4, so we pay a debit to the people who are
+                    # asking for a certain amount for the option.
+                    leg4_open_credit = -leg4_ask_df
+                    leg4_close_credit = leg4_bid_df.fillna(0)
+                else:
+                    # Buying leg 1 again, so we pay a debit to the sellers
+                    midleg_open_credit = -leg1_ask_s
+                    midleg_close_credit = leg1_bid_s.fillna(0)
+                    # Selling leg 4, so we get a credit from the buyers
+                    leg4_open_credit = leg4_bid_df
+                    leg4_close_credit = -leg4_ask_df.fillna(0.01)
+
                 # Add the credits received from leg 2 once more and then
                 # subtract that value from the credits received from each of the
                 # potential leg 4s.
-                open_credits = (-leg4_ask_df).add(
-                    base_open_credits[leg2_strike] + leg2_ask_df[leg2_strike],
+                open_credits = leg4_open_credit.add(
+                    base_open_credits[leg2_strike] + midleg_open_credit,
                     axis='rows'
                 )
 
                 # Subtract the credits we'd need to pay to close out leg 2 once
                 # more and then add the result to the credits we receive from
                 # closing out the fourth leg.
-                close_credits = leg4_bid_df.fillna(0).add(
-                    base_close_credits[leg2_strike] \
-                        - leg2_bid_df[leg2_strike].fillna(0.01),
+                close_credits = leg4_close_credit.add(
+                    base_close_credits[leg2_strike] + midleg_close_credit,
                     axis='rows'
                 )
 
-                close_credits = utils.forward_looking_maximum(close_credits)
-
                 # Get the maximum profit less fees
-                max_profits = open_credits + close_credits - trade_fees
+                max_profits = open_credits \
+                              - trade_fees \
+                              + utils.forward_looking_maximum(close_credits)
 
                 # Convert the DataFrame into a Series which with the same
                 # indexes as `open_margins`.
@@ -383,7 +435,7 @@ def butterfly_spread_worker(
             # (leg 1, leg 2) combination.
             total_trades = base_df.shape[0]
             if total_trades == 0:
-                log('{} 0'.format(count_msg))
+                log('{} 0'.format(count_msg), long_bfly)
                 continue
 
             # Bring all of the indices into the dataframe to be columns
@@ -405,7 +457,10 @@ def butterfly_spread_worker(
             rows_to_get = base_df[
                 ['open_time','leg1_strike', 'leg2_strike']
             ].values
-            to_concat = source_df.loc[
+
+            # Make sure to use the DataFrame associated with our directionality
+            # (i.e., short or long).
+            to_concat = source_dfs['long' if long_bfly else 'short'].loc[
                 [tuple(x) for x in rows_to_get]
             ].reset_index(drop=True)
 
@@ -417,18 +472,31 @@ def butterfly_spread_worker(
                 zip(base_df.open_time, base_df.leg4_strike)
             ].reset_index(drop=True)
 
-            # There are the credits for the opens. Since we're buying leg 4, we
-            # get rid of its bidPrice. Additionally, the columns we just added
-            # via the concat() above already contain the stock price, so we drop
-            # that as well.
-            leg4_meta.drop(['bidPrice', 'stock_price'], axis=1, inplace=True)
+            # There are the credits for the opens. If we're longing the
+            # butterfly, we don't need to see what people are bidding for leg 4.
+            # Additionally, the columns we just added via the concat() above
+            # already contain the stock price, so we drop that as well.
+            leg4_meta.drop(
+                ['bidPrice' if long_bfly else 'askPrice', 'stock_price'],
+                axis=1,
+                inplace=True
+            )
 
             # Any models will need to know if we are buying or selling this
             # leg, so add in this column (BUY = 1, SELL = -1).
-            leg4_meta.insert(0, 'action', 1)
+            leg4_meta.insert(
+                0,
+                'action',
+                1 if long_bfly else -1
+            )
 
-            # Rename the prices to "credits"
-            leg4_meta.rename(columns={'askPrice': 'credit'}, inplace=True)
+            # Rename the price column to "credits".
+            leg4_meta.rename(
+                columns={
+                    ('askPrice' if long_bfly else 'bidPrice'): 'credit'
+                },
+                inplace=True
+            )
 
             # We need to rename each of the columns
             leg4_meta.rename(
@@ -436,7 +504,7 @@ def butterfly_spread_worker(
                 inplace=True
             )
 
-            log('{} {}'.format(count_msg, total_trades))
+            log('{} {}'.format(count_msg, total_trades), long_bfly)
 
             output_q.put(
                 pd.concat((base_df, leg4_meta), axis=1)
@@ -480,6 +548,11 @@ def postprocessing_worker(
         otype = 'call' if row.leg1_type == 'C' else 'put'
         if isinstance(row.leg4_type, str):
             strat = '{} butterfly'.format(otype)
+            # But are we longing it or shorting it?
+            if row.leg2_strike == row.leg3_strike:
+                strat = 'long {}'.format(strat)
+            else:
+                strat = 'short {}'.format(strat)
         else:
             # leg 1 is the buy leg, leg 2 is the second leg
             # buy < sell := "bull"
@@ -551,7 +624,7 @@ def postprocessing_worker(
 
 def collect_spreads(
     options_df,
-    process_counts=[2,4,2],
+    process_counts=[1,4,3],
     max_margin=config.MARGIN,
     get_max_profit=True,
     dataframe_save_threshold=25000,
