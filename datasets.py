@@ -203,10 +203,6 @@ class StrategyGenerator(object):
 
         winning_indices = df.max_profit >= self._min_profit
 
-        # Randomize the leg order to make the model more robust
-        if self._randomize_legs:
-            utils.randomize_legs_columns(df)
-
         return df[winning_indices], df[~winning_indices]
 
 

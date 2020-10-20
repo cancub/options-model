@@ -18,16 +18,6 @@ import trade_processing as tp
 
 from questrade_helpers import QuestradeSecurities
 
-def _get_column_name_list(shuffle=False):
-    leg_order = list(range(1,config.TOTAL_LEGS + 1))
-    if shuffle:
-        np.random.shuffle(leg_order)
-    return reduce(
-        lambda x, i: x + config.LEG_COLUMNS_TEMPLATE.format(num=i),
-        leg_order,
-        config.LEG_COLUMNS_TEMPLATE.format(num=leg_order.pop(0))
-    ).split()
-
 def forward_looking_maximum(df):
     # Get the forward-looking maximum credit by reversing the
     # values, applying a cumulative maximum, then flipping the
@@ -215,13 +205,10 @@ def process_trades_df(df):
 
     # Insert a column which is the open_time in the form of an integer
     # representing the number of minutes until expiry
+    def get_seconds_to_expiry(x):
+        return get_epoch_timestamp(x.expiry) - get_epoch_timestamp(x.open_time)
     df.insert(
-        0,
-        'seconds_to_expiry',
-        df.apply(
-            lambda x: x.expiry_timestamp - get_epoch_timestamp(x.open_time),
-            axis = 1
-        )
+        0, 'seconds_to_expiry', df.apply(get_seconds_to_expiry, axis=1)
     )
 
     # Letters aren't very useful for a model, so add a column with a number
@@ -234,7 +221,7 @@ def process_trades_df(df):
             option_val if df['leg{}_strike'.format(i)].iloc[0] != 0 else 0
         )
 
-    return sort_trades_df_columns(df)
+    return df[config.COLUMN_ORDER]
 
 def spreads_tarballs_to_generator(tarball_paths, count=None, shuffle=True):
     # First we need to get a list of all of the files to be loaded
@@ -261,20 +248,6 @@ def ticker_expiry_to_generator(ticker, expiry, count=None, shuffle=True):
     return spreads_tarballs_to_generator(load_spreads(ticker, expiry),
                                          count,
                                          shuffle)
-
-def sort_trades_df_columns(df):
-    # We don't know what order the data came in wrt columns, but we know the
-    # order we want it in.
-    return df[
-        [c for c in config.HEADER_COLS if c in df.columns] +
-        _get_column_name_list()
-    ]
-
-def randomize_legs_columns(df):
-    # We want to make the model does not care about the order in which the legs
-    # are presented to it
-    df.columns = [c for c in config.HEADER_COLS if c in df.columns] + \
-                 _get_column_name_list(shuffle=True)
 
 def get_security_prices(ticker, start_dt, end_dt, frequency):
     qs = QuestradeSecurities()
