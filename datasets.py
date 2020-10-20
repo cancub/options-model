@@ -48,29 +48,51 @@ class OptionsDataset(object):
     def n_features(self):
         return self._train_df.shape[1]
 
-    def _normalize(self, df, feature_order, means, stds):
-        return (df[feature_order] - means[feature_order]) / stds[feature_order]
+    def _normalize(
+        self,
+        df,
+        means,
+        stds,
+        feature_order,
+        min_max_cols=[],
+        log_cols=[]
+    ):
+        # First re-order the columns to fit the mode and perform the
+        # normalization step
+        df = (df[feature_order] - means[feature_order]) / stds[feature_order]
 
-    def _build_dataset(self, df, feature_order, means, stds):
-        X_norm = self._normalize(df, feature_order, means, stds)
+        # Then do min-max scaling on the columns that require it.
+        to_mm_norm = [c for c in min_max_cols if c in df.columns]
+        mm_df = df[to_mm_norm]
+        c_mins = mm_df.min()
+        df[to_mm_norm] = (mm_df - c_mins) / (mm_df.max() - c_mins)
+
+        # Finally, do log scaling on all of the columns that require it.
+        to_log_norm = [c for c in log_cols if c in df.columns]
+        df[to_log_norm] = np.log(df[to_log_norm])
+
+        return df
+
+    def _build_dataset(self, df, *args, **kwargs):
+        X_norm = self._normalize(df, *args, **kwargs)
         Y = df.max_profit >= self.metadata['min_profit']
         return tf.data.Dataset.from_tensor_slices(
             (X_norm.values, Y.values))
 
-    def get_train_set(self, feature_order, means, stds):
-        return self._build_dataset(self._train_df, feature_order, means, stds)
+    def get_train_set(self, *args, **kwargs):
+        return self._build_dataset(self._train_df, *args, **kwargs)
 
-    def get_val_set(self, feature_order, means, stds):
-        return self._build_dataset(self._val_df, feature_order, means, stds)
+    def get_val_set(self, *args, **kwargs):
+        return self._build_dataset(self._val_df, *args, **kwargs)
 
-    def get_test_set(self, feature_order, means, stds):
-        return self._build_dataset(self._test_df, feature_order, means, stds)
+    def get_test_set(self, *args, **kwargs):
+        return self._build_dataset(self._test_df, *args, **kwargs)
 
-    def get_sets(self, feature_order, means, std):
+    def get_sets(self, *args, **kwargs):
         return (
-            self.get_train_set(feature_order, means, std),
-            self.get_val_set(feature_order, means, std),
-            self.get_test_set(feature_order, means, std),
+            self.get_train_set(*args, **kwargs),
+            self.get_val_set(*args, **kwargs),
+            self.get_test_set(*args, **kwargs),
         )
 
     @classmethod
