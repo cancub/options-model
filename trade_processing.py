@@ -292,6 +292,15 @@ def butterfly_spread_worker(
         # received.
         leg1_strike = source_df.loc[0, 'leg1_strike']
 
+        # We need to recalculate both profit and margin, for each of the leg 1
+        # and leg 2 pairs, so we must drop these values that we received from
+        # the previous worker.
+        source_df.drop(
+            ['max_profit', 'open_margin'],
+            axis=1,
+            inplace=True
+        )
+
         # We'll be working on both short and long butterflies
         source_dfs = {s: source_df.copy() for s in ('short', 'long')}
 
