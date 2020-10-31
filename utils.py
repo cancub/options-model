@@ -191,16 +191,18 @@ def extract_and_get_file_list(tarball_path, output_dir):
 def process_trades_df(df):
     # Insert columns related to the expiry which represent the day of week and
     # the week of the month (with respect to the friday).
-    expiry = df.iloc[0].expiry
     df.insert(
         0,
         'expiry_dow',
-        int(expiry.isoweekday())
+        df.apply(lambda x: int(x.expiry.isoweekday()), axis=1)
     )
+
+    def get_week_of_month(x):
+        return int(np.floor((x.expiry.day - x.expiry.weekday() + 3.9) / 7) + 1)
     df.insert(
         0,
         'expiry_wom',
-        int(np.floor((expiry.day - expiry.weekday() + 3.9) / 7) + 1)
+        df.apply(get_week_of_month, axis=1)
     )
 
     # Insert a column which is the open_time in the form of an integer
