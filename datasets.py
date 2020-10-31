@@ -13,6 +13,7 @@ import tempfile
 import uuid
 
 import config
+import op_stats
 import utils
 
 class OptionsDataset(object):
@@ -51,25 +52,38 @@ class OptionsDataset(object):
     def _normalize(
         self,
         df,
-        means,
-        stds,
-        feature_order,
+        means=None,
+        stds=None,
+        feature_order=None,
         min_max_cols=[],
         log_cols=[]
     ):
+        # Fill in the blanks.
+        if None in (means, stds):
+            loaded_means, loaded_vars = op_stats.pool_stats_from_stats_df(
+                self.metadata['ticker']
+            )
+
+        means = means or loaded_means
+        stds = stds or loaded_vars.pow(1/2)
+
+        feature_order = feature_order or means.index.tolist()
+
         # First re-order the columns to fit the mode and perform the
         # normalization step
         df = (df[feature_order] - means[feature_order]) / stds[feature_order]
 
         # Then do min-max scaling on the columns that require it.
-        to_mm_norm = [c for c in min_max_cols if c in df.columns]
-        mm_df = df[to_mm_norm]
-        c_mins = mm_df.min()
-        df[to_mm_norm] = (mm_df - c_mins) / (mm_df.max() - c_mins)
+        if len(min_max_cols) > 0:
+            to_mm_norm = [c for c in min_max_cols if c in df.columns]
+            mm_df = df[to_mm_norm]
+            c_mins = mm_df.min()
+            df[to_mm_norm] = (mm_df - c_mins) / (mm_df.max() - c_mins)
 
         # Finally, do log scaling on all of the columns that require it.
-        to_log_norm = [c for c in log_cols if c in df.columns]
-        df[to_log_norm] = np.log(df[to_log_norm])
+        if len(log_cols) > 0:
+            to_log_norm = [c for c in log_cols if c in df.columns]
+            df[to_log_norm] = np.log(df[to_log_norm])
 
         return df
 
