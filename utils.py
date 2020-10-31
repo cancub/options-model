@@ -215,13 +215,11 @@ def process_trades_df(df):
 
     # Letters aren't very useful for a model, so add a column with a number
     # representation of the option type
-    option_val = 1 if df.iloc[0].leg1_type == 'C' else -1
-    for i in range(1, config.TOTAL_LEGS + 1):
-        df.insert(
-            0,
-            'leg{}_type_cat'.format(i),
-            option_val if df['leg{}_strike'.format(i)].iloc[0] != 0 else 0
-        )
+    df.insert(
+        0,
+        'option_type_cat',
+        df.apply(lambda x: 1 if x.option_type == 'C' else -1, axis=1)
+    )
 
     return df[config.COLUMN_ORDER]
 

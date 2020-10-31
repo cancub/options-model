@@ -90,10 +90,10 @@ COLUMN_ORDER    = [
     'stock_price',
     'open_margin',
     'max_profit',
+    'option_type',
+    'option_type_cat',
 
     'leg1_symbolId',
-    'leg1_type',
-    'leg1_type_cat',
     'leg1_strike',
     'leg1_action',
     'leg1_credit',
@@ -107,8 +107,6 @@ COLUMN_ORDER    = [
     'leg1_openInterest',
 
     'leg2_symbolId',
-    'leg2_type',
-    'leg2_type_cat',
     'leg2_strike',
     'leg2_action',
     'leg2_credit',
@@ -122,8 +120,6 @@ COLUMN_ORDER    = [
     'leg2_openInterest',
 
     'leg3_symbolId',
-    'leg3_type',
-    'leg3_type_cat',
     'leg3_strike',
     'leg3_action',
     'leg3_credit',
@@ -137,8 +133,6 @@ COLUMN_ORDER    = [
     'leg3_openInterest',
 
     'leg4_symbolId',
-    'leg4_type',
-    'leg4_type_cat',
     'leg4_strike',
     'leg4_action',
     'leg4_credit',
@@ -160,18 +154,12 @@ STATS_IGNORE_COLS = [
     'open_time',
     'open_margin',
     'max_profit',
+    'option_type',
 
     'leg1_symbolId',
-    'leg1_type',
-
     'leg2_symbolId',
-    'leg2_type',
-
     'leg3_symbolId',
-    'leg3_type',
-
     'leg4_symbolId',
-    'leg4_type',
 ]
 
 # The columns which will eventually be used to train a model
@@ -189,16 +177,10 @@ LOG_NORM_COLS = []
 # because they are already normalized by another means or they represent a
 # category value that can take on a neutral value.
 NON_NORM_COLS = [
-    'leg1_type_cat',
+    'option_type_cat',
     'leg1_action',
-
-    'leg2_type_cat',
     'leg2_action',
-
-    'leg3_type_cat',
     'leg3_action',
-
-    'leg4_type_cat',
     'leg4_action',
 ] + MIN_MAX_NORM_COLS + LOG_NORM_COLS
 

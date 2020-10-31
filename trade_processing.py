@@ -554,8 +554,8 @@ def postprocessing_worker(
         output_q.put((strategy_name, df_to_save))
 
     def describer(row):
-        otype = 'call' if row.leg1_type == 'C' else 'put'
-        if isinstance(row.leg4_type, str):
+        otype = 'call' if option_type == 'C' else 'put'
+        if row.leg4_strike != 0:
             strat = '{} butterfly'.format(otype)
             # But are we longing it or shorting it?
             if row.leg2_strike == row.leg3_strike:
@@ -586,13 +586,7 @@ def postprocessing_worker(
                 # get data.
                 continue
 
-        for i in range(1, config.TOTAL_LEGS + 1):
-            source_df.insert(
-                0,
-                'leg{}_type'.format(i),
-                option_type if source_df['leg{}_strike'.format(i)].iloc[0] != 0
-                            else np.nan
-            )
+        source_df.insert(0, 'option_type', option_type)
 
         # Add descriptions to the rows
         source_df.insert(0, 'description', source_df.apply(describer, axis=1))
