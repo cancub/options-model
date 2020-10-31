@@ -183,6 +183,8 @@ MIN_MAX_NORM_COLS = [
     'expiry_wom',
 ]
 
+LOG_NORM_COLS = []
+
 # The columns which should be left alone with regard to normalization. Likely
 # because they are already normalized by another means or they represent a
 # category value that can take on a neutral value.
@@ -198,7 +200,7 @@ NON_NORM_COLS = [
 
     'leg4_type_cat',
     'leg4_action',
-] + MIN_MAX_NORM_COLS
+] + MIN_MAX_NORM_COLS + LOG_NORM_COLS
 
 # The remainder fo the columns will be standardized via mean and std.
 STANDARDIZE_COLS = [
