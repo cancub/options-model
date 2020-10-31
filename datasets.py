@@ -87,11 +87,14 @@ class OptionsDataset(object):
 
         return df
 
-    def _build_dataset(self, df, *args, **kwargs):
+    def _build_dataset(self, df, *args, tf_dataset=True, **kwargs):
         X_norm = self._normalize(df, *args, **kwargs)
         Y = df.max_profit >= self.metadata['min_profit']
-        return tf.data.Dataset.from_tensor_slices(
-            (X_norm.values, Y.values))
+        if tf_dataset:
+            return tf.data.Dataset.from_tensor_slices(
+                (X_norm.values, Y.values))
+        else:
+            return X_norm, Y
 
     def get_train_set(self, *args, **kwargs):
         return self._build_dataset(self._train_df, *args, **kwargs)
