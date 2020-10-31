@@ -499,37 +499,64 @@ def load_dataset(ticker, **kwargs):
         kwargs['save'] = True
         return build_dataset(ticker, verbose=verbose, **kwargs)
 
+def _list(**kwargs):
+    datasets = get_dataset_details(kwargs['ticker'])
+    print(datasets)
+
+def _build(**kwargs):
+
+    # Do a bit of reformatting of the difficult and pooling args as well as the
+    # data split
+    kwargs['hard_winners'], kwargs['hard_losers'] = kwargs.pop('difficult')
+    (kwargs['win_pool_multiplier'],
+     kwargs['loss_pool_multiplier']) = kwargs.pop('pool_multiplier')
+    kwargs['train_val_test_split'] = kwargs.pop('split')
+
+    # Always save the dataset when being run from script.
+    kwargs['save'] = True
+
+    dataset = build_dataset(**kwargs)
+
+    print(dataset.get_dataset_path())
+
 def _get_parser():
+
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    subparsers = parser.add_subparsers()
+    parser_list = subparsers.add_parser('list')
+    parser_list.add_argument('ticker', metavar='TICKER')
+    parser_list.set_defaults(func=_list)
+
+    parser_build = subparsers.add_parser('build')
+    parser_build.add_argument(
         '-m', '--max-margin', type=float, default=5,
         help='The maximum margin to open the trade. (NOTE: per 100 trades)')
-    parser.add_argument(
+    parser_build.add_argument(
         '-w', '--winning-profit', type=float, default=1, dest='min_profit',
         help=('The dollar value threshold between what is considered a "win" '
               'and a "loss." NOTE: per 100 trades'))
-    parser.add_argument(
+    parser_build.add_argument(
         '-t', '--total-datapoints', type=int, default=1*10**6,
         help='The total number of examples that must be generated.')
-    parser.add_argument(
+    parser_build.add_argument(
         '-s', '--split', type=float, nargs=3, default=[0.9, 0.05, 0.05],
         help=('The percent values of the data to be reserved for train, '
               'validation and test, respectively. NOTE: these are decimal '
               'values, so use 0.9 rather than 90.'))
-    parser.add_argument(
+    parser_build.add_argument(
         '-l', '--loss-ratio', type=float, default=1,
         help='The number of losses to obtain for each win of a given strategy')
-    parser.add_argument(
+    parser_build.add_argument(
         '-r', '--randomize-legs', action='store_true',
         help=('Randomize the order in which the legs appear in the output '
               'data. NOTE: the order of the columns within leg sections remains'
               'unchanged.'))
-    parser.add_argument(
+    parser_build.add_argument(
         '-d', '--difficult', nargs=2, type=lambda x: bool(int(x)),
         default=[False, True],
         help=('When selecting the final group of trades for a strategy, only '
               'take the winners and/or losers that are the hardest to guess.'))
-    parser.add_argument(
+    parser_build.add_argument(
         '-p', '--pool-multiplier', type=int, nargs=2, default=[1, 1],
         help=('When gathering data for winners and losers, collect X times as '
               'must datapoints as needed, e.g., if 10K winners for a specific '
@@ -537,30 +564,20 @@ def _get_parser():
               'collect 30K winners. NOTE: this is best used in conjunction '
               'with --hard, as it will collect more difficult-to-guess trades '
               'that would be obtained normally.'))
-    parser.add_argument(
+    parser_build.add_argument(
         '-v', '--verbose', action='store_true',
         help='Display the information about data collection.')
-    parser.add_argument('ticker', metavar='TICKER')
+    parser_build.add_argument('ticker', metavar='TICKER')
+    parser_build.set_defaults(func=_build)
 
     return parser
 
 def main(args=None):
     parser = _get_parser()
-    args = vars(parser.parse_args(args))
+    args = parser.parse_args(args)
 
-    # Do a bit of reformatting of the difficult and pooling args as well as the
-    # data split
-    args['hard_winners'], args['hard_losers'] = args.pop('difficult')
-    (args['win_pool_multiplier'],
-     args['loss_pool_multiplier']) = args.pop('pool_multiplier')
-    args['train_val_test_split'] = args.pop('split')
-
-    # Always save the dataset when being run from script.
-    args['save'] = True
-
-    dataset = build_dataset(**args)
-
-    print(dataset.get_dataset_path())
+    kwargs = vars(args)
+    kwargs.pop('func')(**kwargs)
 
 if __name__ == '__main__':
     main()
