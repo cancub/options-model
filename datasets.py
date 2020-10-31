@@ -458,13 +458,19 @@ def get_dataset_details(ticker):
     return pd.DataFrame(
         datasets_meta).sort_values(by='id').reset_index(drop=True)
 
-def load_dataset(ticker, **kwargs):
+def load_dataset(ticker, id=None, **kwargs):
     verbose = kwargs.pop('verbose', False)
     def log(msg):
         if not verbose: return
         print(msg)
 
     datasets = get_dataset_details(ticker)
+
+    if id is not None:
+        if id not in datasets.id.values:
+            raise Exception(
+                'No dataset exists for {} with id {}'.format(ticker, id))
+        return OptionsDataset.from_tarball(ticker, id)
 
     if datasets.shape[0] == 0:
         log('No saved datasets. Building.')
