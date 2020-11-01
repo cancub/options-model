@@ -55,8 +55,8 @@ class OptionsDataset(object):
         means=None,
         stds=None,
         feature_order=None,
-        min_max_cols=[],
-        log_cols=[]
+        min_max_cols=config.MIN_MAX_NORM_COLS,
+        log_cols=config.LOG_NORM_COLS
     ):
         # Fill in the blanks.
         if None in (means, stds):
