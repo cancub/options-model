@@ -173,7 +173,22 @@ MIN_MAX_NORM_COLS = [
     'expiry_wom',
 ]
 
-LOG_NORM_COLS = []
+LOG_NORM_COLS = [
+    'seconds_to_expiry',
+    'stock_price',
+
+    'leg1_strike',
+    'leg1_credit',
+
+    'leg2_strike',
+    'leg2_credit',
+
+    'leg3_strike',
+    'leg3_credit',
+
+    'leg4_strike',
+    'leg4_credit',
+]
 
 # The columns which should be left alone with regard to normalization. Likely
 # because they are already normalized by another means or they represent a
