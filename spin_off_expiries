@@ -67,12 +67,12 @@ with tempfile.TemporaryDirectory() as tmpdir:
             expiries_popped_for_ticker = True
 
             exp_df = before_df.xs(old_exp, level=1, drop_level=False)
-            exp_df.to_pickle(exp_path)
+            exp_df.to_pickle(exp_path, protocol=config.PICKLE_PROTOCOL)
 
         if expiries_popped_for_ticker:
             # Re-add the remaining, unexpired data to the backup to be saved
             # once more
-            df[new].to_pickle(df_path)
+            df[new].to_pickle(df_path, protocol=config.PICKLE_PROTOCOL)
 
     if expiries_popped:
         tmp_path = backup_path + '.tmp'

@@ -74,4 +74,7 @@ for ticker in tickers:
 
         # Add this data to the stats DataFrame and save it
         stats_df = pd.concat((stats_df, base_df))
-        stats_df.to_pickle(spread_stats_df_path)
+        stats_df.to_pickle(
+            spread_stats_df_path,
+            protocol=config.PICKLE_PROTOCOL
+        )

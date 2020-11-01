@@ -10,6 +10,8 @@ ML_DIR          = os.path.abspath('./learning')
 ML_DATA_DIR     = os.path.join(ML_DIR, 'data')
 ML_MODELS_DIR   = os.path.join(ML_DIR, 'models')
 
+PICKLE_PROTOCOL = 4
+
 DATA_NAMES = [
     'symbolId',
     'bidPrice',

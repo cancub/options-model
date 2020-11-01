@@ -141,9 +141,18 @@ class OptionsDataset(object):
     def to_tarball(self):
         with tempfile.TemporaryDirectory(prefix='options_data-') as tmpdir:
             # Add the data to the archive
-            self._train_df.to_pickle(os.path.join(tmpdir, 'train.bz2'))
-            self._val_df.to_pickle(os.path.join(tmpdir, 'val.bz2'))
-            self._test_df.to_pickle(os.path.join(tmpdir, 'test.bz2'))
+            self._train_df.to_pickle(
+                os.path.join(tmpdir, 'train.bz2'),
+                protocol=config.PICKLE_PROTOCOL
+            )
+            self._val_df.to_pickle(
+                os.path.join(tmpdir, 'val.bz2'),
+                protocol=config.PICKLE_PROTOCOL
+            )
+            self._test_df.to_pickle(
+                os.path.join(tmpdir, 'test.bz2'),
+                protocol=config.PICKLE_PROTOCOL
+            )
 
             # Add the metadata to the archive
             with open(os.path.join(tmpdir, 'metadata'), 'w') as MF:

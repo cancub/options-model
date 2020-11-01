@@ -114,7 +114,8 @@ def load_spreads(ticker, expiry, refresh=False, verbose=0):
                         strat.replace(' ', '_'),
                         uuid.uuid4().hex
                     )
-                )
+                ),
+                protocol=config.PICKLE_PROTOCOL
             )
 
         def spin_off_and_save(strat, df):
@@ -171,7 +172,7 @@ def apply_func_to_dfs_in_tarball(tarball_path, func):
             # Let the function know the name of the file, just in case
             df = func(pd.read_pickle(fpath), f)
             if df is not None:
-                df.to_pickle(fpath)
+                df.to_pickle(fpath, protocol=config.PICKLE_PROTOCOL)
         subprocess.check_call(
             ['tar', '-C', tmpdir, '-cf', tarball_path] + file_list)
 
@@ -181,7 +182,7 @@ def apply_func_to_dfs_in_dir(df_dir, func):
         fpath = os.path.join(exp_dir, f)
         df = func(pd.read_pickle(fpath), fpath)
         if df is not None:
-            df.to_pickle(fpath)
+            df.to_pickle(fpath, protocol=config.PICKLE_PROTOCOL)
 
 def extract_and_get_file_list(tarball_path, output_dir):
     files_bytes = subprocess.check_output(

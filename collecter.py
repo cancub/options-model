@@ -62,7 +62,7 @@ def options_gofer(q_obj, ticker):
         ticker_df = to_add_df
 
     # Save the new ticker DataFrame to file
-    ticker_df.to_pickle(ticker_path)
+    ticker_df.to_pickle(ticker_path, protocol=config.PICKLE_PROTOCOL)
 
 if __name__ == '__main__':
     processes = []

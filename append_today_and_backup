@@ -41,7 +41,7 @@ with TemporaryDirectory() as tmpdirname:
 
         print('Repickling')
         # (Over)write the compressed pickle with the new concatenated data
-        df.to_pickle(compressed_path)
+        df.to_pickle(compressed_path, protocol=config.PICKLE_PROTOCOL)
 
     # Get the name for the new tarball of pickles
     filepath = os.path.join(
