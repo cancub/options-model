@@ -79,8 +79,8 @@ IGNORE_LOSS     = 0
 
 TOTAL_LEGS      = 4
 
-# 9.95 USD -> CAD
-BASE_FEE        = 13
+# 9.95 USD -> CAD -> per contract
+BASE_FEE        = 13/100
 
 COLUMN_ORDER    = [
     'description',

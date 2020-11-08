@@ -41,7 +41,7 @@ def vertical_spread_worker(
     log('START')
 
     # Questrade needs to take its cut too
-    trade_fees = (config.BASE_FEE + 2) * 2 / 100
+    trade_fees = (config.BASE_FEE + 0.02) * 2
 
     all_strikes = ask_df.columns
 
@@ -257,7 +257,7 @@ def butterfly_spread_worker(
     all_strikes = ask_df.columns
 
     # Questrade needs to take its cut too.
-    trade_fees = (config.BASE_FEE + 4) * 2 / 100
+    trade_fees = (config.BASE_FEE + 0.04) * 2
 
     # The percent of the current price on either side of the current price that
     # we will consider when collecting butterflies.
