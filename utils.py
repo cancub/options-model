@@ -14,7 +14,7 @@ import tempfile
 import uuid
 
 import config
-import trade_processing as tp
+from   spread_processing import neural_nets as nn
 
 from questrade_helpers import QuestradeSecurities
 
@@ -88,7 +88,7 @@ def load_spreads(ticker, expiry, refresh=False, verbose=0):
 
     log('Building spreads.')
 
-    spreads_gen = tp.collect_spreads(options_df, verbose=verbose-1)
+    spreads_gen = nn.collect_spreads(options_df, verbose=verbose-1)
 
     # We want to make sure that the data is adequately shuffled so that when
     # it's loaded later on, we don't have a full block of essentially the same
