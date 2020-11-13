@@ -160,6 +160,8 @@ def spreads_generator(
         # This is really a value for just the final DataFrame. No need to
         # include it here.
         expiry_df.drop('stock_price', axis=1, inplace=True)
+        # Work with the naming standard that has been set.
+        prices_series.name = 'stockPrice'
 
         if butterfly:
             # These will be used to restrict ourselves to a certain subset of
