@@ -12,9 +12,9 @@ def vertical_spread_generator(
     max_margin=None
 ):
 
-    def bad_margin(value):
+    def affordable_opens(series):
         try:
-            return value > max_margin
+            return (sum(series) < max_margin).any()
         except TypeError:
             return False
 
@@ -22,9 +22,8 @@ def vertical_spread_generator(
 
         leg1_df = strike_dfs[leg1_strike]
 
-        # Immedaitely ignore this strike as a leg 1 candidate if it is too
-        # expensive.
-        if bad_margin(leg1_df.askPrice.min()):
+        opens = [leg1_df.askPrice]
+        if not affordable_opens(opens):
             continue
 
         leg2_strikes = all_strikes[all_strikes != leg1_strike]
@@ -33,9 +32,7 @@ def vertical_spread_generator(
 
             leg2_df = strike_dfs[leg2_strike]
 
-            # Check that the combination has some affordable opens
-            if bad_margin((leg1_df.askPrice + leg2_df.bidPrice).min()):
-                # Too rich for our blood.
+            if not affordable_opens(opens + [leg2_df.bidPrice]):
                 continue
 
             # Ok, we have a long leg and a short leg that have at least one
@@ -67,9 +64,9 @@ def butterfly_spread_generator(
     max_margin=None,
 ):
 
-    def bad_margin(value):
+    def affordable_opens(series):
         try:
-            return value > max_margin
+            return (sum(series) < max_margin).any()
         except TypeError:
             return False
 
@@ -87,13 +84,12 @@ def butterfly_spread_generator(
         middle_margin_col = middle_prefix + '_askPrice'
         highest_prefix = 'short2_'
         highest_margin_col = 'bidPrice'
-    
-    three_leg_margin = (vert_strat_df.long1_askPrice
-                            + vert_strat_df.short1_bidPrice
-                            + vert_strat_df[middle_margin_col])
 
-    if bad_margin(three_leg_margin.min()):
-        # This is already too pricey and we have yet to look at the last leg.
+    opens = [vert_strat_df.long1_askPrice
+                + vert_strat_df.short1_bidPrice
+                + vert_strat_df[middle_margin_col]]
+
+    if not affordable_opens(opens):
         return
 
     # Duplicate middle strike and give it column names to identify it as an
@@ -104,8 +100,7 @@ def butterfly_spread_generator(
     mid_df = vert_strat_df[rename_dict.keys()].rename(columns=rename_dict)
 
     for high_df in high_strike_dfs:
-        # Check that the combination has some affordable opens
-        if bad_margin((three_leg_margin + high_df[highest_margin_col]).min()):
+        if not affordable_opens(opens + [high_df[highest_margin_col]]):
             # Too rich for our blood.
             continue
 
