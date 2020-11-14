@@ -293,7 +293,7 @@ def spreads_generator(
     for expiry in sorted(options_df.index.unique(level=1)):
         exp_gens[expiry] = expiry_spreads_generator(
             expiry, 
-            options_df.xs(expiry, level=1),
+            options_df.xs(expiry, level=1).copy(),
             vertical,
             butterfly,
             window_percent,
