@@ -173,7 +173,7 @@ def option_type_spreads_generator(
         if vertical:
             # Continue building the completed DataFrame with the
             # strikes for (non-existent) legs 3 and 4.
-            out_df = vert_df.copy()
+            out_df = vert_df.astype(np.float32)
             for c in out_df.columns:
                 out_df[c.replace('1', '2')] = 0
 
@@ -213,7 +213,7 @@ def option_type_spreads_generator(
             )
 
             for butt_df in butt_gen:
-                yield butt_df
+                yield butt_df.astype(np.float32)
 
 def expiry_spreads_generator(
     expiry,
@@ -235,6 +235,7 @@ def expiry_spreads_generator(
     expiry_df.drop('stock_price', axis=1, inplace=True)
     # Work with the naming standard that has been set.
     prices_series.name = 'stockPrice'
+    prices_series = prices_series.astype(np.float32)
 
     option_type_gens = {}
 
