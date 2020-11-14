@@ -55,7 +55,7 @@ def vertical_spread_generator(
             strat_df.long1_strike = leg1_strike
             strat_df.short1_strike = leg2_strike
 
-            yield strat_df.fillna(0)
+            yield strat_df
 
 def butterfly_spread_generator(
     vert_strat_df,
@@ -131,7 +131,7 @@ def butterfly_spread_generator(
 
         # Set everything else to 0 and now we have everything we need to
         # output.
-        yield strat_df.fillna(0)
+        yield strat_df
 
 
 def spreads_generator(
@@ -192,7 +192,8 @@ def spreads_generator(
             def postprocess_df(df):
                 df.insert(0, 'expiry', expiry_dt)
                 df.insert(0, 'optionType', option_type)
-                return pd.concat((prices_series[df.index], df), axis=1)
+                final_df = pd.concat((prices_series[df.index], df), axis=1)
+                return final_df
 
             for vert_df in vert_gen:
 
