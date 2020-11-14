@@ -46,8 +46,13 @@ def vertical_spread_generator(
             short_df = leg2_df.rename(
                 columns={c: 'short1_' + c for c in orig_columns})
 
+
             # Combine these legs to build the strategy.
-            strat_df = pd.concat((long_df, short_df), axis=1)
+            try:
+                strat_df = pd.concat((long_df, short_df), axis=1)
+            except ValueError:
+                # This stems from there being a duplicate in the indices.
+                continue
 
             # There are likely to be timepoints for which we only have data
             # for one of the legs, so we make sure to fill the strike columns
@@ -107,16 +112,20 @@ def butterfly_spread_generator(
         # Ok, we have a butterfly with at least one open that is affordable.
         # Use what we have so far to build a DataFrame representing all of the
         # time points for this strategy.
-        strat_df = pd.concat(
-            (
-                vert_strat_df,
-                mid_df,
-                high_df.rename(
-                    columns={c: highest_prefix + c for c in high_df.columns}
-                )
-            ),
-            axis=1
-        )
+        try:
+            strat_df = pd.concat(
+                (
+                    vert_strat_df,
+                    mid_df,
+                    high_df.rename(
+                        columns={c: highest_prefix + c for c in high_df.columns}
+                    )
+                ),
+                axis=1
+            )
+        except ValueError:
+            # This stems from there being a duplicate in the indices.
+            continue
 
         # There are likely to be timepoints for which we only have data for one
         # of the legs, so we make sure to fill the strike columns with the
