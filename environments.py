@@ -17,7 +17,9 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
         expiries,
         max_margin=config.MARGIN,
         vertical=True,
-        butterfly=True
+        butterfly=True,
+        gen_processes=8,
+        queue_size=32,
     ):
         # This is a ready-made state manager which has already loaded
         # up a strategy generator as well as the first state.
@@ -26,7 +28,9 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
             expiries,
             max_margin=max_margin,
             vertical=vertical,
-            butterfly=butterfly
+            butterfly=butterfly,
+            gen_processes=gen_processes,
+            queue_size=queue_size
         )
 
         self._episode_ended = False

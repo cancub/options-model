@@ -1,16 +1,14 @@
+from multiprocessing import Process, Value, Queue
 import numpy as np
 import pandas as pd
+import queue
 
 import config
 import utils
 
 # ============================== Vertical spreads ==============================
 
-def vertical_spread_generator(
-    all_strikes,
-    strike_dfs,
-    max_margin=None
-):
+def vert_generator(df, strikes, max_margin=None):
 
     def affordable_opens(series):
         try:
@@ -18,19 +16,36 @@ def vertical_spread_generator(
         except TypeError:
             return False
 
-    for leg1_strike in all_strikes:
+    leg1_strikes = strikes[:]
+    np.random.shuffle(leg1_strikes)
 
-        leg1_df = strike_dfs[leg1_strike]
+    while True:
+
+        try:
+            leg1_strike = leg1_strikes.pop(0)
+        except IndexError:
+            break
+        else:
+            if len(leg1_strikes) == 0:
+                # We can't compare a leg to itself
+                break
+
+        leg1_df = df.xs(leg1_strike, level=1)
 
         opens = [leg1_df.askPrice]
         if not affordable_opens(opens):
             continue
 
-        leg2_strikes = all_strikes[all_strikes != leg1_strike]
+        # Use the remaining strikes as the source for the second leg
+        leg2_strikes = leg1_strikes[:]
 
-        for leg2_strike in leg2_strikes:
+        while True:
+            try:
+                leg2_strike = leg2_strikes.pop(0)
+            except IndexError:
+                break
 
-            leg2_df = strike_dfs[leg2_strike]
+            leg2_df = df.xs(leg2_strike, level=1)
 
             if not affordable_opens(opens + [leg2_df.bidPrice]):
                 continue
@@ -57,16 +72,19 @@ def vertical_spread_generator(
             # There are likely to be timepoints for which we only have data
             # for one of the legs, so we make sure to fill the strike columns
             # with the respective values and then set everything else to 0.
-            strat_df.long1_strike = leg1_strike
-            strat_df.short1_strike = leg2_strike
+            strat_df.insert(0, 'long1_strike', leg1_strike)
+            strat_df.insert(0, 'short1_strike', leg2_strike)
 
-            yield strat_df
+            yield leg1_strike, leg2_strike, strat_df
 
-def butterfly_spread_generator(
+
+def bfly_generator(
+    base_df,
     vert_strat_df,
+    mid_strike,
+    strikes,
     long,
-    high_strike_dfs,
-    max_margin=None,
+    max_margin=None
 ):
 
     def affordable_opens(series):
@@ -78,21 +96,21 @@ def butterfly_spread_generator(
     if long:
         # This is a long butterfly, so the duplicate strike is the short
         # strike and the highest strike is a long strike.
-        middle_prefix = 'short1'
-        middle_margin_col = middle_prefix + '_bidPrice'
-        highest_prefix = 'long2_'
-        highest_margin_col = 'askPrice'
+        mid_prefix = 'short1'
+        mid_margin_col = mid_prefix + '_bidPrice'
+        high_prefix = 'long2_'
+        high_margin_col = 'askPrice'
     else:
         # This is a short butterfly, so the duplicate strike is the long
         # strike and the highest strike is a short strike.
-        middle_prefix = 'long1'
-        middle_margin_col = middle_prefix + '_askPrice'
-        highest_prefix = 'short2_'
-        highest_margin_col = 'bidPrice'
+        mid_prefix = 'long1'
+        mid_margin_col = mid_prefix + '_askPrice'
+        high_prefix = 'short2_'
+        high_margin_col = 'bidPrice'
 
     opens = [vert_strat_df.long1_askPrice
                 + vert_strat_df.short1_bidPrice
-                + vert_strat_df[middle_margin_col]]
+                + vert_strat_df[mid_margin_col]]
 
     if not affordable_opens(opens):
         return
@@ -100,12 +118,36 @@ def butterfly_spread_generator(
     # Duplicate middle strike and give it column names to identify it as an
     # independent leg.
     rename_dict = {c: c.replace('1', '2')
-                for c in vert_strat_df.columns
-                if middle_prefix in c}
-    mid_df = vert_strat_df[rename_dict.keys()].rename(columns=rename_dict)
+                    for c in vert_strat_df.columns
+                    if mid_prefix in c}
+    three_df = pd.concat(
+        (
+            vert_strat_df,
+            vert_strat_df[rename_dict.keys()].rename(columns=rename_dict)
+        ),
+        axis=1
+    )
 
-    for high_df in high_strike_dfs:
-        if not affordable_opens(opens + [high_df[highest_margin_col]]):
+    # Build a dictionary to use for filling in empty strike values after all
+    # the concats are done.
+    mid_strike_col = mid_prefix + '_strike'
+    fill_dict = {
+        'long1_strike': three_df.long1_strike.min(),
+        'short1_strike': three_df.long1_strike.min(),
+        mid_strike_col: three_df[mid_strike_col].min()
+    }
+
+    high_strikes = [s for s in strikes if s > mid_strike]
+
+    while True:
+        try:
+            high_strike = high_strikes.pop(0)
+        except IndexError:
+            break
+
+        high_df = base_df.xs(high_strike, level=1)
+
+        if not affordable_opens(opens + [high_df[high_margin_col]]):
             # Too rich for our blood.
             continue
 
@@ -115,10 +157,9 @@ def butterfly_spread_generator(
         try:
             strat_df = pd.concat(
                 (
-                    vert_strat_df,
-                    mid_df,
+                    three_df,
                     high_df.rename(
-                        columns={c: highest_prefix + c for c in high_df.columns}
+                        columns={c: high_prefix + c for c in high_df.columns}
                     )
                 ),
                 axis=1
@@ -127,24 +168,17 @@ def butterfly_spread_generator(
             # This stems from there being a duplicate in the indices.
             continue
 
+        strat_df.insert(0, high_prefix + 'strike', high_strike)
+
         # There are likely to be timepoints for which we only have data for one
         # of the legs, so we make sure to fill the strike columns with the
         # respective values.
-        for side in ('long', 'short'):
-            for leg in ('1', '2'):
-                col = side + leg + '_strike'
-                vals = strat_df[col]
-                if vals.isna().any():
-                    # Min retrieves the non-nan value of the strike.
-                    strat_df[col] = vals.min()
+        strat_df.fillna(fill_dict)
 
-        # Set everything else to 0 and now we have everything we need to
-        # output.
         yield strat_df
 
-def option_type_spreads_generator(
-    option_type,
-    option_type_df,
+def option_type_generator(
+    df,
     prices_series,
     vertical=True,
     butterfly=True,
@@ -154,34 +188,16 @@ def option_type_spreads_generator(
 
     if butterfly:
         # These will be used to restrict ourselves to a certain subset of
-        # trades that are centered somewhere around the current strike
-        # price.
+        # trades that are centered somewhere around the current strike price.
         window = prices_series * window_percent
 
-    # Convert the strike index to a column.
-    option_type_df.reset_index('strike', inplace=True)
+    strikes = sorted(df.index.unique(level=1).to_list())
 
-    # Build the dictionary of individual strikes data.
-    all_strikes = option_type_df.strike.unique()
-    np.random.shuffle(all_strikes)
-    strike_dfs = {}
-    for s in all_strikes:
-        strike_dfs[s] = (
-            option_type_df[option_type_df.strike == s].drop(
-                'symbolId', axis=1)
-        )
-
-    vert_gen = vertical_spread_generator(
-        all_strikes,
-        strike_dfs,
-        max_margin
-    )
-
-    for vert_df in vert_gen:
+    for long_s, short_s, vert_df in vert_generator(df, strikes, max_margin):
 
         if vertical:
-            # Continue building the completed DataFrame with the
-            # strikes for (non-existent) legs 3 and 4.
+            # Continue building the completed DataFrame with the strikes for
+            # (non-existent) legs 3 and 4.
             out_df = vert_df.astype(np.float32)
             for c in out_df.columns:
                 out_df[c.replace('1', '2')] = 0
@@ -189,75 +205,88 @@ def option_type_spreads_generator(
             yield out_df
 
         if butterfly:
-            # Use the vertical dataframe as the starter to build all
-            # acceptable butterflies.
+            # Use the vertical dataframe as the starter to build all acceptable
+            # butterflies.
 
             # Determine the middle strike which will be duplicated.
-            first = vert_df.iloc[0]
-            middle_strike = max(
-                first.long1_strike, first.short1_strike)
+            mid_strike = max(long_s, short_s)
 
             # Was this strike ever in the specified window?
-            low_enough = (-window + middle_strike) <= prices_series
-            high_enough = (window + middle_strike) >= prices_series
+            low_enough = (-window + mid_strike) <= prices_series
+            high_enough = (window + mid_strike) >= prices_series
             if not (low_enough & high_enough).any():
                 # No, it was not.
                 continue
 
-            # There was at least one point in the history of this
-            # strategy that it existed in the window we've specified.
-            # Get all of the strikes which may be used for the highest
-            # strike to complete the strategy.
-            high_strikes = all_strikes[all_strikes > middle_strike]
+            # Let the generator know which kind of butterfly it's dealing with:
+            # long or short.
+            long = short_s == mid_strike
 
-            # Let the generator know which kind of butterfly it's
-            # dealing with: long or short.
-            long = vert_df.iloc[0].short1_strike == middle_strike
-
-            butt_gen = butterfly_spread_generator(
-                vert_df,
-                long,
-                [strike_dfs[s] for s in high_strikes],
-                max_margin,
-            )
-
-            for butt_df in butt_gen:
-                yield butt_df.astype(np.float32)
+            for bfly_df in bfly_generator(
+                    df, vert_df, mid_strike, strikes, long, max_margin):
+                yield bfly_df
 
 def expiry_spreads_generator(
     expiry,
     expiry_df,
+    prices,
     vertical=True,
     butterfly=True,
     window_percent=0.015,
     max_margin=config.MARGIN
 ):
+    # Build a metadata DataFrame that will be concat'd with each of the
+    # DataFrames output by the generators.
+    meta_df = pd.DataFrame(prices)
 
     # Get the expiry as an aware datetime at the 4 pm closing bell.
     expiry_dt = utils.expiry_string_to_aware_datetime(expiry)
 
-    # Get the prices of the stock at each time in this input dataframe.
-    prices_series = expiry_df.groupby(level=[0])['stock_price'].first()
+    eday = expiry_dt.day
+    ewday = expiry_dt.weekday()
+    eisowday = expiry_dt.isoweekday()
 
-    # This is really a value for just the final DataFrame. No need to
-    # include it here.
-    expiry_df.drop('stock_price', axis=1, inplace=True)
-    # Work with the naming standard that has been set.
-    prices_series.name = 'stockPrice'
-    prices_series = prices_series.astype(np.float32)
+    # Insert a column which is the open_time in the form of an integer
+    # representing the number of minutes until expiry
+    def get_minutes_to_expiry(x):
+        exp_ts = utils.get_epoch_timestamp(expiry_dt)
+        cur_ts = utils.get_epoch_timestamp(x.name)
+        return (exp_ts - cur_ts) / 60
 
+    meta_df.insert(
+        0,
+        'minsToExpiry',
+        meta_df.apply(get_minutes_to_expiry, axis=1)
+    )
+
+    # min-max expiry day of week (min = 1, max = 5)
+    meta_df.insert(0, 'expiryDoW', (eisowday - 1) / 4)
+
+    # min-max expiry week of month (min = 1, max = 5).
+    meta_df.insert(
+        0,
+        'expiryWoM',
+        (int(np.floor((eday - ewday + 3.9) / 7) + 1) - 1) / 4
+    )
+
+    otype_series = {}
     option_type_gens = {}
 
     for option_type in ('C', 'P'):
 
-        option_type_gens[option_type] = option_type_spreads_generator(
-            option_type,
+        option_type_gens[option_type] = option_type_generator(
             expiry_df.xs(option_type, level=1),
-            prices_series,
+            prices,
             vertical,
             butterfly,
             window_percent,
             max_margin
+        )
+
+        otype_series[option_type] = pd.Series(
+            index=meta_df.index,
+            data=1 if option_type == 'C' else 0,
+            name='optionType'
         )
 
     while len(option_type_gens) > 0:
@@ -269,10 +298,18 @@ def expiry_spreads_generator(
                 df = next(gen)
 
                 # Add in the last few columns.
-                df.insert(0, 'expiry', expiry_dt)
-                df.insert(0, 'optionType', option_type)
-                final_df = pd.concat((prices_series[df.index], df), axis=1)
-                yield final_df
+                indices = df.index
+                final_df = pd.concat(
+                    (
+                        meta_df.loc[indices,:],
+                        otype_series[option_type][indices],
+                        df
+                    ),
+                    axis=1
+                )
+
+                # Make sure we only consider time before the expiry.
+                yield final_df[final_df.index <= expiry_dt]
 
             except StopIteration:
                 # There are no more trades for this expiry.
@@ -282,33 +319,88 @@ def spreads_generator(
     options_df,
     vertical=True,
     butterfly=True,
-    window_percent=0.015,
+    window_percent=0.008,
+    gen_processes=4,
+    queue_size=32,
     max_margin=config.MARGIN
 ):
 
-    exp_gens = {}
+    def worker(expiry_generators, q):
+        while len(expiry_generators) > 0:
+            # Walk through each of the remaining expiries to get a new strategy
+            # from each.
+            for expiry, gen in expiry_generators.items():
+                try:
+                    # Provide a new strategy for this expiry.
+                    df = next(gen)
+                    q.put(df)
+                except StopIteration:
+                    # There are no more trades for this expiry.
+                    del expiry_generators[expiry]
 
-    # Set things up so that we never see a trade from the same expiry twice as
-    # long as there are still trades for each expiry.
+    # This is just filler right now.
+    options_df.drop('symbolId', axis=1, inplace=True)
+
+    # Get the prices of the stock at each time in this input dataframe.
+    prices = options_df.pop('stock_price').droplevel(level=[1, 2, 3])
+    prices = prices[~prices.index.duplicated(keep='first')].sort_index()
+    # Work with the naming standard that has been set.
+    prices.name = 'stockPrice'
+
+    exp_count = 0
+    exp_gens = {}
     for expiry in sorted(options_df.index.unique(level=1)):
+        exp_count += 1
         exp_gens[expiry] = expiry_spreads_generator(
-            expiry, 
-            options_df.xs(expiry, level=1).copy(),
+            expiry,
+            options_df.xs(expiry, level=1),
+            prices,
             vertical,
             butterfly,
             window_percent,
             max_margin
         )
 
-    while len(exp_gens) > 0:
-        # Walk through each of the remaining expiries to get a new strategy
-        # from each.
-        for expiry, gen in exp_gens.items():
+    # Divide the expiries up evenly among the processes.
+    proc_expiries = []
+    base_expiries_per_proc = len(exp_gens) // gen_processes
+
+    # There aren't enough expiries for all processes to get at least one.
+    if base_expiries_per_proc == 0:
+        gen_processes = len(exp_gens)
+        base_expiries_per_proc = 1
+
+    # The first pass through.
+    for _ in range(gen_processes):
+        to_add = {}
+        for _ in range(base_expiries_per_proc):
+            exp_count -= 1
+            exp, gen = exp_gens.popitem()
+            to_add[exp] = gen
+
+        proc_expiries.append(to_add)
+    
+    # The second pass through for the remainder.
+    for i in range(exp_count):
+        exp, gen = exp_gens.popitem()
+        proc_expiries[i][exp] = gen
+
+    output_queues = {}
+    for i in range(gen_processes):
+        
+        q = Queue(maxsize=queue_size)
+        p = Process(target=worker, args=(proc_expiries[i], q))
+        output_queues[p] = q
+        p.start()
+
+    while len(output_queues) > 0:
+        for p, q in output_queues.items():
             try:
-                # Provide a new strategy for this expiry.
-                yield next(gen)
-            except StopIteration:
-                # There are no more trades for this expiry.
-                del exp_gens[expiry]
+                yield q.get(timeout=0.1)
+            except queue.Empty:
+                if not p.is_alive():
+                    # This thread is done, so stop checking its queue.
+                    output_queues.pop(p)
+                    p.join()
 
 

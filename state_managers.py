@@ -80,7 +80,9 @@ class StrategyStateManager(object):
         expiries,
         max_margin=config.MARGIN,
         vertical=True,
-        butterfly=True
+        butterfly=True,
+        gen_processes=8,
+        queue_size=32,
     ):
         # Load in the options for this ticker-expiry
         self._options_df = pd.concat(
@@ -97,7 +99,12 @@ class StrategyStateManager(object):
 
         # The generator which is used to load up the next strategy
         self._strats_df_generator = rl.spreads_generator(
-            self._options_df, vertical=vertical, butterfly=butterfly)
+            self._options_df,
+            vertical=vertical,
+            butterfly=butterfly,
+            gen_processes=gen_processes,
+            queue_size=queue_size,
+        )
 
         # Collect the statistics for each row
         standardize_df = self._options_df[[
@@ -172,36 +179,16 @@ class StrategyStateManager(object):
         # Reset to load everything up.
         self.reset()
 
-    def _clean_df(self):
-        # Make sure we're not considering times after the expiry.
-        valid_times = self._strat_df.index <= self._strat_df.expiry[0]
-        self._strat_df = self._strat_df[valid_times]
-
     def _process_df(self):
         all_columns = self._strat_df.columns
         log_cols = []
 
-        # Pop out the expiry so that we don't need to care about it as we
-        # process the other columns.
-        expiry = self._strat_df.pop('expiry')[0]
-
-        # Move on to taking the log(1+x) of each of the dollar-related or
-        # quantity- related columns. Prior to taking the logs, we need to make
-        # sure that all strikes and prices are on the same scale.
+        # Take the log(1+x) of each of the dollar- or quantity-related columns.
+        # Prior to taking the logs, we need to make sure that all strikes and
+        # prices are on the same scale.
         for col_substring in ('askPrice', 'bidPrice'):
             log_cols += [col for col in all_columns if col_substring in col]
         self._strat_df.loc[:, log_cols] *= 100
-
-        # Insert a column which is the open_time in the form of an integer
-        # representing the number of minutes until expiry
-        def get_minutes_to_expiry(x):
-            return (utils.get_epoch_timestamp(expiry)
-                        - utils.get_epoch_timestamp(x.name)) / 60
-        self._strat_df.insert(
-            0,
-            'minsToExpiry',
-            self._strat_df.apply(get_minutes_to_expiry, axis=1)
-        )
 
         # Add the remaining log columns to the list.
         log_cols += ['stockPrice', 'minsToExpiry']
@@ -222,27 +209,6 @@ class StrategyStateManager(object):
             greek_cols = [c for c in std_cols if greek in c]
             zero_mean = self._strat_df[greek_cols] - self._means[greek]
             self._strat_df.loc[:,greek_cols] = zero_mean / self._stds[greek]
-
-        # Now that we're finished normalizing, we can add in the processed
-        # expiry data.
-        # min-max expiry day of week (min = 1, max = 5)
-        self._strat_df.insert(
-            0,
-            'expiryDoW',
-            (expiry.isoweekday() - 1) / 4
-        )
-        # min-max expiry week of month (min = 1, max = 5)
-        self._strat_df.insert(
-            0,
-            'expiryWoM',
-            (
-                int(
-                    np.floor(
-                        (expiry.day - expiry.weekday() + 3.9) / 7
-                    ) + 1
-                ) - 1
-            ) / 4
-        )
 
         # Put the columns in a standard order so that the agent can learn.
         self._strat_df = self._strat_df[HEADER_COLS + LEGS_COLS]
@@ -286,8 +252,6 @@ class StrategyStateManager(object):
     def reset(self):
         # Move to the next strategy.
         self._strat_df = next(self._strats_df_generator)
-
-        self._clean_df()
 
         # Flesh out the details of how we will make opening and closing trades.
         self._set_legs_meta()
