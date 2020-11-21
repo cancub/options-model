@@ -23,7 +23,7 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
     ):
         # This is a ready-made state manager which has already loaded
         # up a strategy generator as well as the first state.
-        self._state_manager = StrategyStateManager(
+        self.state_manager = StrategyStateManager(
             ticker,
             expiries,
             max_margin=max_margin,
@@ -33,7 +33,7 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
             queue_size=queue_size
         )
 
-        self._episode_ended = False
+        self.episode_ended = False
 
         # We can have 2 actions:
         #   0: do nothing
@@ -45,7 +45,7 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
         #       the trade + the expiry details + the details of the currently-
         #       held trade when it was bought
         self._observation_spec = array_spec.ArraySpec(
-            shape=self._state_manager.state.shape,
+            shape=self.state_manager.state.shape,
             dtype=np.float64,
             name='observation'
         )
@@ -57,30 +57,30 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
         return self._observation_spec
 
     def _reset(self):
-        self._episode_ended = False
+        self.episode_ended = False
 
         # Make the manager load up the next strategy and obtain the initial
         # state.
-        self._state = self._state_manager.reset()
+        self._state = self.state_manager.reset()
 
         return ts.restart(self._state)
 
     def _step(self, action):
 
-        if self._episode_ended:
+        if self.episode_ended:
             # The last action ended the episode. Ignore the current action and
             # start a new episode.
             return self.reset()
 
         # We're performing an action. Check to see if this is the last
         # possible moment to do anything.
-        if (self._state_manager.over
-                or (self._state_manager.holding and action == 1)):
-            self._episode_ended = True
+        if (self.state_manager.over
+                or (self.state_manager.holding and action == 1)):
+            self.episode_ended = True
             # The episode is over, so we need to compare how we did vs the best
             # possible profit. This is 0 if it's a bad trade and we decide to
             # sit out.
-            max_profit = max(self._state_manager.max_profit, 0)
+            max_profit = max(self.state_manager.max_profit, 0)
 
         # Work from the base of a zero reward.
         reward = 0
@@ -88,10 +88,10 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
         # Make sure episodes don't go on forever.
         if action == 1:
             # Making a transition in what we're holding.
-            if not self._state_manager.holding:
+            if not self.state_manager.holding:
                 # Buying the strategy.
                 # Is there even any time left to buy?
-                if self._state_manager.over:
+                if self.state_manager.over:
                     # The agent just attempted to buy the strategy when there
                     # was no time left to do so. There's a difference between
                     # being bold and being dumb. That's a paddlin'.
@@ -100,7 +100,7 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
                     # Let the state manager know to copy the current strategy
                     # into the stored strategy section of the state array.
                     try:
-                        self._state_manager.buy()
+                        self.state_manager.buy()
                     except (ValueError, AttributeError):
                         # This trade wasn't actually available. Shame on the
                         # agent for trying to buy it.
@@ -113,7 +113,7 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
                 try:
                     # How close was the agent to the maximum profit (including
                     # if they had sat out a strategy that had no way to win).
-                    profit = self._state_manager.sell()
+                    profit = self.state_manager.sell()
                     reward += profit - max_profit
                 except AttributeError:
                     # There wasn't a closing trade available.
@@ -124,15 +124,15 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
                     reward += BONUS
         elif action == 0:
             # Sticking with what we're currently holding (if anything).
-            if self._state_manager.over:
+            if self.state_manager.over:
                 # Don't hold the strategy to the bitter end.
                 reward += PADDLIN
 
                 # In the case of the agent holding a strategy at we'll give
                 # them the benefit of the doubt and sell for them (factoring in
                 # the penalty).
-                if self._state_manager.holding:
-                    reward += self._state_manager.sell(allow_nan=True)
+                if self.state_manager.holding:
+                    reward += self.state_manager.sell(allow_nan=True)
 
                 # Be sure to compare this to what they would have made in
                 # the ideal scenario (including if they had sat out a strategy
@@ -141,9 +141,9 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
         else:
             raise ValueError('`action` should be 0 or 1.')
 
-        if self._episode_ended:
+        if self.episode_ended:
             return ts.termination(self._state, reward)
         else:
             # Move on to the next timepoint.
-            self._state = self._state_manager.step()
+            self._state = self.state_manager.step()
             return ts.transition(self._state, reward=reward, discount=1.0)
