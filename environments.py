@@ -1,20 +1,26 @@
+# Python
+import numpy as np
+import random
+
+# Local
 import config
 from state_managers import StrategyStateManager
 
-import numpy as np
-
+# Tensorflow
 from tf_agents.environments import py_environment
 from tf_agents.specs import array_spec
 from tf_agents.trajectories import time_step as ts
 
-BONUS = 0.05
-PADDLIN = -0.01
 class OptionsTradingEnv(py_environment.PyEnvironment):
 
     def __init__(
         self,
         ticker,
         expiries,
+        paddlin=0,
+        bonus=0,
+        history_length=4,
+        no_op_steps=10,
         max_margin=config.MARGIN,
         vertical=True,
         butterfly=True,
@@ -33,7 +39,17 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
             queue_size=queue_size
         )
 
+        self.input_length = self.state_manager.state.shape[0]
+        self.no_op_steps = no_op_steps
+
+        self.history_length = history_length
+
+        self.strat_timepoint = None
+
         self.episode_ended = False
+
+        self.bonus = bonus
+        self.paddlin = paddlin
 
         # We can have 2 actions:
         #   0: do nothing
@@ -41,11 +57,9 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
         self._action_spec = array_spec.BoundedArraySpec(
             shape=(), dtype=np.int32, minimum=0, maximum=1, name='action')
 
-        # TODO: fill in this value with the shape of the current details of
-        #       the trade + the expiry details + the details of the currently-
-        #       held trade when it was bought
+        # Remember that observations will include several timepoints.
         self._observation_spec = array_spec.ArraySpec(
-            shape=self.state_manager.state.shape,
+            shape=(self.input_length*self.history_length,),
             dtype=np.float64,
             name='observation'
         )
@@ -56,12 +70,29 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
     def observation_spec(self):
         return self._observation_spec
 
-    def _reset(self):
-        self.episode_ended = False
+    def _reset(self, evaluation=False):
+        '''
+        Resets the environment
 
-        # Make the manager load up the next strategy and obtain the initial
-        # state.
-        self._state = self.state_manager.reset()
+        Arguments:
+            evaluation: Set to True when the agent is being evaluated. Takes a
+                        random number of no-op steps if True.
+
+        Returns:
+            A "restart" TimeStep with the current state.
+        '''
+        self.episode_ended = False
+        self.state_manager.reset()
+
+        # If evaluating, take a random number of no-op steps. This adds an
+        # element of randomness, so that the each evaluation is slightly
+        # different.
+        if evaluation:
+            for _ in range(random.randint(0, self.no_op_steps)):
+                self.strat_timepoint = self.state_manager.step()
+
+        # For the initial state, we tile the first timepoint four times.
+        self._state = np.tile(self.strat_timepoint, self.history_length)
 
         return ts.restart(self._state)
 
@@ -95,7 +126,7 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
                     # The agent just attempted to buy the strategy when there
                     # was no time left to do so. There's a difference between
                     # being bold and being dumb. That's a paddlin'.
-                    reward += PADDLIN
+                    reward += self.paddlin
                 else:
                     # Let the state manager know to copy the current strategy
                     # into the stored strategy section of the state array.
@@ -104,10 +135,10 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
                     except (ValueError, AttributeError):
                         # This trade wasn't actually available. Shame on the
                         # agent for trying to buy it.
-                        reward += PADDLIN
+                        reward += self.paddlin
                     else:
                         # Reward boldness.
-                        reward += BONUS
+                        reward += self.bonus
             else:
                 # Selling the strategy.
                 try:
@@ -117,16 +148,16 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
                     reward += profit - max_profit
                 except AttributeError:
                     # There wasn't a closing trade available.
-                    reward += PADDLIN
+                    reward += self.paddlin
                 else:
                     # Then sweeten the deal if the agent sold prior to the
                     # expiry.
-                    reward += BONUS
+                    reward += self.bonus
         elif action == 0:
             # Sticking with what we're currently holding (if anything).
             if self.state_manager.over:
                 # Don't hold the strategy to the bitter end.
-                reward += PADDLIN
+                reward += self.paddlin
 
                 # In the case of the agent holding a strategy at we'll give
                 # them the benefit of the doubt and sell for them (factoring in
@@ -145,5 +176,9 @@ class OptionsTradingEnv(py_environment.PyEnvironment):
             return ts.termination(self._state, reward)
         else:
             # Move on to the next timepoint.
-            self._state = self.state_manager.step()
+            self.strat_timepoint = self.state_manager.step()
+            self._state = np.append(
+                self._state[:-self.input_length],
+                self.strat_timepoint
+            )
             return ts.transition(self._state, reward=reward, discount=1.0)
